@@ -33,6 +33,7 @@ extern char **environ;
 @property (nonatomic, strong) NSMutableArray<DateLyricsPreviewLine *> *lines;
 @property (nonatomic, strong) NSMutableArray<DateLyricsPreviewWord *> *currentWords;
 @property (nonatomic, assign) NSInteger backgroundDepth; // track x-bg nesting
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *spanIsBgStack; // track individual span backgrounds
 @property (nonatomic, assign) BOOL insideP;
 @property (nonatomic, assign) double currentPBegin;
 @property (nonatomic, assign) double currentPEnd;
@@ -48,6 +49,7 @@ extern char **environ;
         _lines = [NSMutableArray array];
         _currentWords = [NSMutableArray array];
         _backgroundDepth = 0;
+        _spanIsBgStack = [NSMutableArray array];
         _insideP = NO;
         _currentPBegin = 0.0;
         _currentPEnd = 0.0;
@@ -62,13 +64,18 @@ extern char **environ;
         _insideP = YES;
         [_currentWords removeAllObjects];
         _backgroundDepth = 0;
+        [_spanIsBgStack removeAllObjects];
         _currentPBegin = [attributeDict[@"begin"] doubleValue];
         _currentPEnd = [attributeDict[@"end"] doubleValue];
     } else if ([elementName isEqualToString:@"span"] && _insideP) {
+        BOOL isThisSpanBg = NO;
         NSString *role = attributeDict[@"ttm:role"] ?: attributeDict[@"role"];
         if ([role isEqualToString:@"x-bg"]) {
+            isThisSpanBg = YES;
             _backgroundDepth++;
         }
+        [_spanIsBgStack addObject:@(isThisSpanBg)];
+
         if (attributeDict[@"begin"]) {
             _currentSpanBegin = [attributeDict[@"begin"] doubleValue];
         } else {
@@ -95,8 +102,14 @@ extern char **environ;
 }
 
 - (void)parser:(NSXMLParser *)parser didEndElement:(NSString *)elementName namespaceURI:(NSString *)namespaceURI qualifiedName:(NSString *)qName {
-    if ([elementName isEqualToString:@"span"] && _insideP && _backgroundDepth > 0) {
-        _backgroundDepth--;
+    if ([elementName isEqualToString:@"span"] && _insideP) {
+        if (_spanIsBgStack.count > 0) {
+            BOOL wasThisSpanBg = [[_spanIsBgStack lastObject] boolValue];
+            [_spanIsBgStack removeLastObject];
+            if (wasThisSpanBg && _backgroundDepth > 0) {
+                _backgroundDepth--;
+            }
+        }
     } else if ([elementName isEqualToString:@"p"] && _insideP) {
         _insideP = NO;
         if (_currentWords.count == 0) return;
@@ -566,6 +579,31 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
         if (wordHighlighting && wordRanges.count > 0) {
                 NSInteger wordIdx = self.previewWordIndex;
+                if (self.previewAnimationTimer && self.previewLines.count > 0) {
+                        NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
+                        NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
+                        DateLyricsPreviewLine *currentLine = self.previewLines[lineIdx];
+
+                        NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
+                        for (NSUInteger i = 0; i < currentLine.wordRanges.count; i++) {
+                                BOOL isBg = [currentLine.wordIsBackground[i] boolValue];
+                                if (isBg && !showAdlibs) continue;
+                                [visibleWordBegins addObject:currentLine.wordBeginTimes[i]];
+                        }
+
+                        NSInteger resolvedWordIndex = -1;
+                        if (timeInSong >= currentLine.beginTime) {
+                                for (NSInteger i = 0; i < visibleWordBegins.count; i++) {
+                                        double wBegin = [visibleWordBegins[i] doubleValue];
+                                        if (timeInSong >= wBegin) {
+                                                resolvedWordIndex = i;
+                                        }
+                                }
+                        }
+                        wordIdx = resolvedWordIndex;
+                        self.previewWordIndex = resolvedWordIndex;
+                }
+
                 BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 
                 if (highlightStyle == 2) {
@@ -962,6 +1000,31 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 	if (wordHighlighting && wordRanges.count > 0) {
 		NSInteger wordIdx = self.previewWordIndex;
+		if (self.previewAnimationTimer && self.previewLines.count > 0) {
+			NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
+			NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
+			DateLyricsPreviewLine *currentLine = self.previewLines[lineIdx];
+
+			NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
+			for (NSUInteger i = 0; i < currentLine.wordRanges.count; i++) {
+				BOOL isBg = [currentLine.wordIsBackground[i] boolValue];
+				if (isBg && !showAdlibs) continue;
+				[visibleWordBegins addObject:currentLine.wordBeginTimes[i]];
+			}
+
+			NSInteger resolvedWordIndex = -1;
+			if (timeInSong >= currentLine.beginTime) {
+				for (NSInteger i = 0; i < visibleWordBegins.count; i++) {
+					double wBegin = [visibleWordBegins[i] doubleValue];
+					if (timeInSong >= wBegin) {
+						resolvedWordIndex = i;
+					}
+				}
+			}
+			wordIdx = resolvedWordIndex;
+			self.previewWordIndex = resolvedWordIndex;
+		}
+
 		BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 		if (highlightStyle == 2) {
 			UIColor *textColor = [UIColor labelColor];
