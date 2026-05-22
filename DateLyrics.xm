@@ -160,6 +160,14 @@ static const void *kDateLyricsOriginalHiddenKey = &kDateLyricsOriginalHiddenKey;
 static const void *kDateLyricsRestoringStockDateKey = &kDateLyricsRestoringStockDateKey;
 static const void *kDateLyricsLabelShowingLyricKey = &kDateLyricsLabelShowingLyricKey;
 static const void *kDateLyricsAnimatingTransitionKey = &kDateLyricsAnimatingTransitionKey;
+static const void *kDateLyricsOriginalFontKey = &kDateLyricsOriginalFontKey;
+static const void *kDateLyricsOriginalTextColorKey = &kDateLyricsOriginalTextColorKey;
+static const void *kDateLyricsOriginalNumberOfLinesKey = &kDateLyricsOriginalNumberOfLinesKey;
+static const void *kDateLyricsOriginalAdjustsFontSizeKey = &kDateLyricsOriginalAdjustsFontSizeKey;
+static const void *kDateLyricsOriginalMinScaleKey = &kDateLyricsOriginalMinScaleKey;
+static const void *kDateLyricsOriginalLineBreakModeKey = &kDateLyricsOriginalLineBreakModeKey;
+static const void *kDateLyricsOriginalAttributedTextKey = &kDateLyricsOriginalAttributedTextKey;
+static const void *kDateLyricsOriginalTextKey = &kDateLyricsOriginalTextKey;
 
 static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
 static NSString *const kDateLyricsCurrentLineKey = @"CurrentLyricLine";
@@ -1348,6 +1356,43 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     objc_setAssociatedObject(label, kDateLyricsLabelShowingLyricKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, @selector(_amlApplyCurrentLyric), nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsAnimatingTransitionKey, nil, OBJC_ASSOCIATION_ASSIGN);
+
+    UIFont *origFont = objc_getAssociatedObject(label, kDateLyricsOriginalFontKey);
+    if (origFont) {
+        label.font = origFont;
+        objc_setAssociatedObject(label, kDateLyricsOriginalFontKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    
+    UIColor *origColor = objc_getAssociatedObject(label, kDateLyricsOriginalTextColorKey);
+    if (origColor) {
+        label.textColor = origColor;
+        objc_setAssociatedObject(label, kDateLyricsOriginalTextColorKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    
+    id origNumLines = objc_getAssociatedObject(label, kDateLyricsOriginalNumberOfLinesKey);
+    if (origNumLines) {
+        label.numberOfLines = [origNumLines integerValue];
+        objc_setAssociatedObject(label, kDateLyricsOriginalNumberOfLinesKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    
+    id origAdjusts = objc_getAssociatedObject(label, kDateLyricsOriginalAdjustsFontSizeKey);
+    if (origAdjusts) {
+        label.adjustsFontSizeToFitWidth = [origAdjusts boolValue];
+        objc_setAssociatedObject(label, kDateLyricsOriginalAdjustsFontSizeKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    
+    id origMinScale = objc_getAssociatedObject(label, kDateLyricsOriginalMinScaleKey);
+    if (origMinScale) {
+        label.minimumScaleFactor = [origMinScale doubleValue];
+        objc_setAssociatedObject(label, kDateLyricsOriginalMinScaleKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    
+    id origLineBreak = objc_getAssociatedObject(label, kDateLyricsOriginalLineBreakModeKey);
+    if (origLineBreak) {
+        label.lineBreakMode = (NSLineBreakMode)[origLineBreak integerValue];
+        objc_setAssociatedObject(label, kDateLyricsOriginalLineBreakModeKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+
     if (!dateView) return;
 
     label.text = nil;
@@ -1356,6 +1401,21 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     dateView.hidden = NO;
 
     objc_setAssociatedObject(dateView, kDateLyricsRestoringStockDateKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    
+    NSAttributedString *origAttrText = objc_getAssociatedObject(label, kDateLyricsOriginalAttributedTextKey);
+    NSString *origText = objc_getAssociatedObject(label, kDateLyricsOriginalTextKey);
+    if (origAttrText) {
+        NSMutableAttributedString *cleanStr = [origAttrText mutableCopy];
+        [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, cleanStr.length)];
+        label.attributedText = cleanStr;
+        objc_setAssociatedObject(label, kDateLyricsOriginalAttributedTextKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    } else if (origText) {
+        NSMutableAttributedString *cleanStr = [[NSMutableAttributedString alloc] initWithString:origText];
+        [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, cleanStr.length)];
+        label.attributedText = cleanStr;
+        objc_setAssociatedObject(label, kDateLyricsOriginalTextKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+
     if ([dateView respondsToSelector:@selector(_updateLabel)]) {
         [dateView performSelector:@selector(_updateLabel)];
     }
@@ -1465,6 +1525,30 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
 %hook _UIAnimatingLabel
 
+- (void)setText:(NSString *)text {
+    if (![objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue]) {
+        if (text) {
+            NSMutableAttributedString *cleanStr = [[NSMutableAttributedString alloc] initWithString:text];
+            [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, text.length)];
+            self.attributedText = cleanStr;
+            return;
+        }
+    }
+    %orig;
+}
+
+- (void)setAttributedText:(NSAttributedString *)attributedText {
+    if (![objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue]) {
+        if (attributedText) {
+            NSMutableAttributedString *cleanStr = [attributedText mutableCopy];
+            [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, cleanStr.length)];
+            %orig(cleanStr);
+            return;
+        }
+    }
+    %orig;
+}
+
 %new
 - (void)_amlApplyCurrentLyric {
     if (!gDateLyricsEnabled) {
@@ -1525,6 +1609,15 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
                     NSString *syllable = [lyric substringWithRange:range];
                     [mAttrStr replaceCharactersInRange:range withString:[syllable uppercaseString]];
                 }
+            } else if (gDateLyricsHighlightStyle == 2) {
+                UIColor *textColor = self.textColor ?: [UIColor whiteColor];
+                UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
+                if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
+                    [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:backgroundHighlightRange];
+                }
             } else {  
                 UIColor *textColor = self.textColor ?: [UIColor whiteColor];
 
@@ -1537,6 +1630,26 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
                 }
             }
             attrDisplayText = mAttrStr;
+        }
+    }
+
+    BOOL isShowingLyric = [objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue];
+    if (!isShowingLyric) {
+        if (self.font) {
+            objc_setAssociatedObject(self, kDateLyricsOriginalFontKey, self.font, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (self.textColor) {
+            objc_setAssociatedObject(self, kDateLyricsOriginalTextColorKey, self.textColor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        objc_setAssociatedObject(self, kDateLyricsOriginalNumberOfLinesKey, @(self.numberOfLines), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, kDateLyricsOriginalAdjustsFontSizeKey, @(self.adjustsFontSizeToFitWidth), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, kDateLyricsOriginalMinScaleKey, @(self.minimumScaleFactor), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, kDateLyricsOriginalLineBreakModeKey, @(self.lineBreakMode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        
+        if (self.attributedText) {
+            objc_setAssociatedObject(self, kDateLyricsOriginalAttributedTextKey, self.attributedText, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        } else if (self.text) {
+            objc_setAssociatedObject(self, kDateLyricsOriginalTextKey, self.text, OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
     }
 
@@ -1586,62 +1699,60 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     CFPreferencesAppSynchronize((__bridge CFStringRef)@"com.shalamand3r.datelyrics");
 
-    NSNumber *valEnabled = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("Enabled"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valForceLowercase = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("ForceLowercase"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valWord = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("WordHighlighting"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valTrail = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("HighlightTrail"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valStyle = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("HighlightStyle"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valUseCustomFont = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("UseCustomFont"), CFSTR("com.shalamand3r.datelyrics"));
-    NSString *valCustomFontName = (__bridge_transfer NSString *)CFPreferencesCopyAppValue(CFSTR("CustomFontName"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valTransitionsEnabled = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("TransitionsEnabled"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valTransitionStyle = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("TransitionStyle"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valTransitionDuration = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("TransitionDuration"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valStroke = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("StrokeWidth"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valSplitLongLines = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("SplitLongLines"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valScale = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("MinimumScale"), CFSTR("com.shalamand3r.datelyrics"));
-    NSNumber *valPause = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("PauseTimeout"), CFSTR("com.shalamand3r.datelyrics"));
-
-    if (!valEnabled || !valPause || !valSplitLongLines) {
-        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/jb/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
-        if (!prefs) {
-            prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
-        }
-        if (prefs) {
-            if (!valEnabled) valEnabled = prefs[@"Enabled"];
-            if (!valForceLowercase) valForceLowercase = prefs[@"ForceLowercase"];
-            if (!valWord) valWord = prefs[@"WordHighlighting"];
-            if (!valTrail) valTrail = prefs[@"HighlightTrail"];
-            if (!valStyle) valStyle = prefs[@"HighlightStyle"];
-            if (!valUseCustomFont) valUseCustomFont = prefs[@"UseCustomFont"];
-            if (!valCustomFontName) valCustomFontName = prefs[@"CustomFontName"];
-            if (!valTransitionsEnabled) valTransitionsEnabled = prefs[@"TransitionsEnabled"];
-            if (!valTransitionStyle) valTransitionStyle = prefs[@"TransitionStyle"];
-            if (!valTransitionDuration) valTransitionDuration = prefs[@"TransitionDuration"];
-            if (!valStroke) valStroke = prefs[@"StrokeWidth"];
-            if (!valSplitLongLines) valSplitLongLines = prefs[@"SplitLongLines"];
-            if (!valScale) valScale = prefs[@"MinimumScale"];
-            if (!valPause) valPause = prefs[@"PauseTimeout"];
-        }
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/jb/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
+    if (!prefs) {
+        prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
     }
 
-    gDateLyricsEnabled = valEnabled ? [valEnabled boolValue] : YES;
-    gDateLyricsForceLowercase = valForceLowercase ? [valForceLowercase boolValue] : NO;
-    gDateLyricsWordHighlighting = valWord ? [valWord boolValue] : YES;
-    gDateLyricsHighlightTrail = valTrail ? [valTrail boolValue] : NO;
-    gDateLyricsHighlightStyle = valStyle ? [valStyle integerValue] : 0;
-    gDateLyricsUseCustomFont = valUseCustomFont ? [valUseCustomFont boolValue] : NO;
-    gDateLyricsCustomFontName = [valCustomFontName isKindOfClass:NSString.class] ? [valCustomFontName copy] : nil;
-    gDateLyricsTransitionsEnabled = valTransitionsEnabled ? [valTransitionsEnabled boolValue] : YES;
-    NSInteger transitionStyle = valTransitionStyle ? [valTransitionStyle integerValue] : DateLyricsTransitionStyleFade;
+    auto getPrefBool = ^BOOL(NSString *key, BOOL defaultVal) {
+        if (prefs && prefs[key]) return [prefs[key] boolValue];
+        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+        return val ? [val boolValue] : defaultVal;
+    };
+
+    auto getPrefInteger = ^NSInteger(NSString *key, NSInteger defaultVal) {
+        if (prefs && prefs[key]) return [prefs[key] integerValue];
+        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+        return val ? [val integerValue] : defaultVal;
+    };
+
+    auto getPrefFloat = ^CGFloat(NSString *key, CGFloat defaultVal) {
+        if (prefs && prefs[key]) return (CGFloat)[prefs[key] floatValue];
+        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+        return val ? (CGFloat)[val floatValue] : defaultVal;
+    };
+
+    auto getPrefDouble = ^double(NSString *key, double defaultVal) {
+        if (prefs && prefs[key]) return [prefs[key] doubleValue];
+        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+        return val ? [val doubleValue] : defaultVal;
+    };
+
+    auto getPrefString = ^NSString *(NSString *key, NSString *defaultVal) {
+        if (prefs && prefs[key]) return [prefs[key] copy];
+        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+        return val ? [val copy] : defaultVal;
+    };
+
+    gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
+    gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
+    gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
+    gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", NO);
+    gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 0);
+    gDateLyricsUseCustomFont = getPrefBool(@"UseCustomFont", NO);
+    gDateLyricsCustomFontName = getPrefString(@"CustomFontName", nil);
+    gDateLyricsTransitionsEnabled = getPrefBool(@"TransitionsEnabled", YES);
+    
+    NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleFade);
     if (transitionStyle < DateLyricsTransitionStyleFade || transitionStyle > DateLyricsTransitionStylePop) {
         transitionStyle = DateLyricsTransitionStyleFade;
     }
     gDateLyricsTransitionStyle = transitionStyle;
-    gDateLyricsTransitionDuration = valTransitionDuration ? [valTransitionDuration doubleValue] : 0.28;
-    gDateLyricsStrokeWidth = valStroke ? [valStroke floatValue] : 3.0;
-    gDateLyricsSplitLongLines = valSplitLongLines ? [valSplitLongLines boolValue] : NO;
-    gDateLyricsMinimumScale = valScale ? [valScale floatValue] : 0.55;
-    gDateLyricsPauseTimeout = valPause ? [valPause doubleValue] : 3.0;
+    gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.28);
+    gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
+    gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", NO);
+    gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
+    gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 3.0);
 
     if (!gDateLyricsEnabled) {
         if (DateLyricsIsSpringBoardHost()) {
@@ -1650,8 +1761,23 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         } else if (DateLyricsIsMusicHost()) {
             DateLyricsPublishPayload(nil);
         }
-    } else if (DateLyricsIsSpringBoardHost()) {
-        DateLyricsApplyCurrentLineToAllCoverSheets();
+    } else {
+        if (DateLyricsIsSpringBoardHost()) {
+            DateLyricsApplyCurrentLineToAllCoverSheets();
+        } else if (DateLyricsIsMusicHost()) {
+            if (gNowPlayingInfoCenter) {
+                MPNowPlayingContentItem *currentItem = [gNowPlayingInfoCenter nowPlayingContentItem];
+                if (currentItem) {
+                    currentItem.amlCurrentPayloadSignature = nil;
+                    double elapsed = [currentItem calculatedElapsedTime];
+                    float rate = 1.0f;
+                    if ([currentItem respondsToSelector:@selector(playbackRate)]) {
+                        rate = currentItem.playbackRate;
+                    }
+                    [currentItem setElapsedTime:elapsed playbackRate:rate];
+                }
+            }
+        }
     }
 }
 

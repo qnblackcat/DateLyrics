@@ -341,6 +341,11 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 if (highlightStyle == 1) {
                         NSString *substring = [baseText substringWithRange:highlightRange];
                         [attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
+                } else if (highlightStyle == 2) {
+                        UIColor *textColor = [UIColor labelColor];
+                        UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+                        [attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
+                        [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
                 } else {
                         [attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
                         [attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
@@ -643,6 +648,11 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		if (highlightStyle == 1) {
 			NSString *substring = [baseText substringWithRange:highlightRange];
 			[attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
+		} else if (highlightStyle == 2) {
+			UIColor *textColor = [UIColor labelColor];
+			UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+			[attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
+			[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
 		} else {
 			[attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
 			[attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
