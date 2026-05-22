@@ -1155,20 +1155,21 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         }
     }
 
-    if (!storeID || (gNowPlayingInfoCenter && currentStoreID != storeID) || !isTrulyPlaying) {
-        [timer invalidate];
-        self.amlTimer = nil;
-        if (!isTrulyPlaying) {
-            double elapsedTime = [self calculatedElapsedTime];
-            [self setElapsedTime:MAX(0, elapsedTime) playbackRate:0.0f];
-        }
-        return;
-    }
     float rate = 1.0f;
     if (self.amlPlaybackRate != nil) {
         rate = [self.amlPlaybackRate floatValue];
     } else if ([self respondsToSelector:@selector(playbackRate)]) {
         rate = self.playbackRate;
+    }
+
+    if (!storeID || (gNowPlayingInfoCenter && currentStoreID != storeID) || !isTrulyPlaying || rate == 0.0f) {
+        [timer invalidate];
+        self.amlTimer = nil;
+        if (!isTrulyPlaying || rate == 0.0f) {
+            double elapsedTime = [self calculatedElapsedTime];
+            [self setElapsedTime:MAX(0, elapsedTime) playbackRate:0.0f];
+        }
+        return;
     }
     double elapsedTime = [self calculatedElapsedTime];
     [self setElapsedTime:MAX(0, elapsedTime) playbackRate:rate];
@@ -1744,6 +1745,38 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         return;
     }
     NSDictionary *payload = gDateLyricsCurrentPayload ?: DateLyricsStoredPayload();
+    if (payload && !gDateLyricsShowAdlibs) {
+        NSString *rawText = payload[@"text"];
+        NSString *strippedText = DateLyricsStripParentheses(rawText) ?: @"";
+        if (![strippedText isEqualToString:rawText]) {
+            NSMutableDictionary *mutablePayload = [payload mutableCopy];
+            mutablePayload[@"text"] = strippedText;
+            
+            NSUInteger strippedLen = strippedText.length;
+            NSNumber *locNum = mutablePayload[@"loc"];
+            NSNumber *lenNum = mutablePayload[@"len"];
+            if (locNum && lenNum) {
+                NSUInteger loc = locNum.unsignedIntegerValue;
+                NSUInteger len = lenNum.unsignedIntegerValue;
+                if (loc == NSNotFound || loc + len > strippedLen) {
+                    [mutablePayload removeObjectForKey:@"loc"];
+                    [mutablePayload removeObjectForKey:@"len"];
+                }
+            }
+            
+            NSNumber *bgLocNum = mutablePayload[@"bgLoc"];
+            NSNumber *bgLenNum = mutablePayload[@"bgLen"];
+            if (bgLocNum && bgLenNum) {
+                NSUInteger bgLoc = bgLocNum.unsignedIntegerValue;
+                NSUInteger bgLen = bgLenNum.unsignedIntegerValue;
+                if (bgLoc == NSNotFound || bgLoc + bgLen > strippedLen) {
+                    [mutablePayload removeObjectForKey:@"bgLoc"];
+                    [mutablePayload removeObjectForKey:@"bgLen"];
+                }
+            }
+            payload = [mutablePayload copy];
+        }
+    }
     UIFont *configuredFont = DateLyricsConfiguredFontForLabel(self);
     NSDictionary *renderPayload = DateLyricsSplitPayloadForLabel(payload, self, configuredFont) ?: payload;
     NSString *lyric = renderPayload[@"text"];
@@ -2016,14 +2049,12 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
             }
         } else {
             if (DateLyricsIsSpringBoardHost()) {
+                gDateLyricsCurrentPayload = [(DateLyricsStoredPayload() ?: @{}) copy];
                 DateLyricsApplyCurrentLineToAllCoverSheets();
             } else if (DateLyricsIsMusicHost()) {
                 if (gNowPlayingInfoCenter) {
                     MPNowPlayingContentItem *currentItem = [gNowPlayingInfoCenter nowPlayingContentItem];
                     if (currentItem) {
-                        currentItem.amlCurrentPayloadSignature = nil;
-                        double elapsed = [currentItem calculatedElapsedTime];
-                        float rate = 1.0f;
                         BOOL isTrulyPlaying = YES;
                         if (gNowPlayingInfoCenter && [gNowPlayingInfoCenter respondsToSelector:@selector(playbackState)]) {
                             NSUInteger state = gNowPlayingInfoCenter.playbackState;
@@ -2031,14 +2062,21 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
                                 isTrulyPlaying = NO;
                             }
                         }
-                        if (!isTrulyPlaying) {
-                            rate = 0.0f;
-                        } else if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
+                        
+                        float rate = 1.0f;
+                        if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
                             rate = [currentItem.amlPlaybackRate floatValue];
                         } else if ([currentItem respondsToSelector:@selector(playbackRate)]) {
                             rate = currentItem.playbackRate;
                         }
-                        [currentItem setElapsedTime:elapsed playbackRate:rate];
+                        
+                        if (rate == 0.0f) {
+                            isTrulyPlaying = NO;
+                        }
+                        
+                        currentItem.amlCurrentPayloadSignature = nil;
+                        double elapsed = [currentItem calculatedElapsedTime];
+                        [currentItem setElapsedTime:elapsed playbackRate:(isTrulyPlaying ? rate : 0.0f)];
                     }
                 }
             }

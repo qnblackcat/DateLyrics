@@ -499,7 +499,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	        }
 	}
 	[self amlRefreshMainPreview];
-	}
+}
 - (void)amlUpdateHeaderArtwork {
 	if (!self.headerImageView) return;
 
