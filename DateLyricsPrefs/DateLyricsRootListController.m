@@ -5,9 +5,6 @@
 
 extern char **environ;
 
-// ---------------------------------------------------------------------------
-// Lightweight TTML preview parser
-// ---------------------------------------------------------------------------
 @interface DateLyricsPreviewWord : NSObject
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, assign) BOOL isBackground;
@@ -18,13 +15,13 @@ extern char **environ;
 @end
 
 @interface DateLyricsPreviewLine : NSObject
-@property (nonatomic, copy) NSString *text;      // full assembled line text
-@property (nonatomic, copy) NSArray<NSValue *> *wordRanges;   // NSRange per word
-@property (nonatomic, copy) NSArray<NSNumber *> *wordIsBackground; // BOOL per word
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, copy) NSArray<NSValue *> *wordRanges;
+@property (nonatomic, copy) NSArray<NSNumber *> *wordIsBackground;
 @property (nonatomic, assign) double beginTime;
 @property (nonatomic, assign) double endTime;
-@property (nonatomic, copy) NSArray<NSNumber *> *wordBeginTimes; // double per word
-@property (nonatomic, copy) NSArray<NSNumber *> *wordEndTimes;   // double per word
+@property (nonatomic, copy) NSArray<NSNumber *> *wordBeginTimes;
+@property (nonatomic, copy) NSArray<NSNumber *> *wordEndTimes;
 @end
 @implementation DateLyricsPreviewLine
 @end
@@ -32,8 +29,8 @@ extern char **environ;
 @interface DateLyricsTTMLParser : NSObject <NSXMLParserDelegate>
 @property (nonatomic, strong) NSMutableArray<DateLyricsPreviewLine *> *lines;
 @property (nonatomic, strong) NSMutableArray<DateLyricsPreviewWord *> *currentWords;
-@property (nonatomic, assign) NSInteger backgroundDepth; // track x-bg nesting
-@property (nonatomic, strong) NSMutableArray<NSNumber *> *spanIsBgStack; // track individual span backgrounds
+@property (nonatomic, assign) NSInteger backgroundDepth;
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *spanIsBgStack;
 @property (nonatomic, assign) BOOL insideP;
 @property (nonatomic, assign) double currentPBegin;
 @property (nonatomic, assign) double currentPEnd;
@@ -114,7 +111,6 @@ extern char **environ;
         _insideP = NO;
         if (_currentWords.count == 0) return;
 
-        // Assemble the full line text and compute word ranges
         NSMutableString *text = [NSMutableString string];
         NSMutableArray<NSValue *> *ranges = [NSMutableArray array];
         NSMutableArray<NSNumber *> *bgFlags = [NSMutableArray array];
@@ -284,21 +280,17 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	UILabel *currentLabel = self.mainPreviewLabel;
 	UILabel *nextLabel = [[UILabel alloc] initWithFrame:currentLabel.frame];
 	
-	// 1. Render the new line (target state) to nextLabel
 	self.previewLineIndex = toLine;
 	self.previewWordIndex = word;
 	[self amlRefreshMainPreview];
 	nextLabel.attributedText = currentLabel.attributedText;
 	
-	// 2. Render the old line (completed state) back to currentLabel
 	self.previewLineIndex = fromLine;
-	// Set word index to the last word of the old line so it appears completed during fade out
 	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
 	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
 	self.previewWordIndex = fromWordCount - 1;
 	[self amlRefreshMainPreview];
 	
-	// 3. Restore the target indexes so they are in sync
 	self.previewLineIndex = toLine;
 	self.previewWordIndex = word;
 
@@ -339,7 +331,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 	NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
 
-	// Resolve current line
 	NSInteger resolvedLineIndex = 0;
 	for (NSInteger i = 0; i < self.previewLines.count; i++) {
 		if (timeInSong >= self.previewLines[i].beginTime) {
@@ -349,7 +340,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 	}
 
-	// Resolve current word
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
 	DateLyricsPreviewLine *previewLine = self.previewLines[resolvedLineIndex];
@@ -372,7 +362,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 	}
 
-	// Check if line changed
 	if (resolvedLineIndex != self.previewLineIndex) {
 		NSInteger oldLineIndex = self.previewLineIndex;
 		[self amlAnimatePreviewFromLine:oldLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex];
@@ -521,7 +510,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
         CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
 
-        // Pick the current preview line from parsed TTML
         DateLyricsPreviewLine *previewLine = nil;
         NSArray<NSValue *> *wordRanges = nil;
         NSString *baseText = nil;
@@ -530,7 +518,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
                 previewLine = self.previewLines[lineIdx];
 
-                // Filter out background words if Show Adlibs is off
                 NSMutableString *filteredText = [NSMutableString string];
                 NSMutableArray<NSValue *> *filteredRanges = [NSMutableArray array];
                 for (NSUInteger i = 0; i < previewLine.wordRanges.count; i++) {
@@ -546,7 +533,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 baseText = [filteredText copy];
                 wordRanges = [filteredRanges copy];
         } else {
-                // Fallback to hardcoded strings if TTML unavailable
                 NSArray *fallback = @[@"1 Test Lyric", @"Lyric Test 1"];
                 baseText = fallback[self.previewLineIndex % fallback.count];
                 if (self.previewLineIndex % 2 == 0) {
@@ -1074,20 +1060,17 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	nextLabel.minimumScaleFactor = currentLabel.minimumScaleFactor;
 	nextLabel.adjustsFontSizeToFitWidth = currentLabel.adjustsFontSizeToFitWidth;
 	
-	// 1. Render the new line (target state) to nextLabel
 	self.previewLineIndex = toLine;
 	self.previewWordIndex = word;
 	[self amlUpdatePreviewLabel];
 	nextLabel.attributedText = currentLabel.attributedText;
 	
-	// 2. Render the old line (completed state) back to currentLabel
 	self.previewLineIndex = fromLine;
 	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
 	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
 	self.previewWordIndex = fromWordCount - 1;
 	[self amlUpdatePreviewLabel];
 	
-	// 3. Restore the target indexes so they are in sync
 	self.previewLineIndex = toLine;
 	self.previewWordIndex = word;
 
@@ -1128,7 +1111,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 	NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
 
-	// Resolve current line
 	NSInteger resolvedLineIndex = 0;
 	for (NSInteger i = 0; i < self.previewLines.count; i++) {
 		if (timeInSong >= self.previewLines[i].beginTime) {
@@ -1138,7 +1120,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 	}
 
-	// Resolve current word
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
 	DateLyricsPreviewLine *previewLine = self.previewLines[resolvedLineIndex];
@@ -1161,7 +1142,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 	}
 
-	// Check if line changed
 	if (resolvedLineIndex != self.previewLineIndex) {
 		NSInteger oldLineIndex = self.previewLineIndex;
 		[self amlAnimatePreviewFromLine:oldLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex];
