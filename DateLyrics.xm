@@ -1334,6 +1334,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
                 DateLyricsSetRangeFields(mutableWordPayload, @"focusBg", focusBackgroundRange);
                 mutableWordPayload[@"started"] = @(isLineStarted);
                 mutableWordPayload[@"finished"] = @(isLineFinished);
+                mutableWordPayload[@"lineId"] = @(line.begin);
                 wordPayload = [mutableWordPayload copy];
             } else {
                 wordPayload = nil;
@@ -1402,6 +1403,11 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         payload = [timedPayload copy];
     } else {
         payload = DateLyricsMakePayload(title, NSMakeRange(NSNotFound, 0));
+        if (payload) {
+            NSMutableDictionary *mutablePayload = [payload copy] ? [[payload copy] mutableCopy] : [NSMutableDictionary dictionary];
+            mutablePayload[@"lineId"] = title ?: @"";
+            payload = [mutablePayload copy];
+        }
     }
     NSString *payloadSignature = DateLyricsSerializePayload(payload);
     
@@ -1544,6 +1550,7 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     CSProminentSubtitleDateView *dateView = DateLyricsFindAncestorDateView(label);
     objc_setAssociatedObject(label, kDateLyricsLabelShowingLyricKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, @selector(_amlApplyCurrentLyric), nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(label, @selector(previousLineId), nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsAnimatingTransitionKey, nil, OBJC_ASSOCIATION_ASSIGN);
 
     UIFont *origFont = objc_getAssociatedObject(label, kDateLyricsOriginalFontKey);
@@ -1937,6 +1944,15 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
     BOOL contentChanged = NO;
     BOOL lineChanged = ![previousDisplayText isEqualToString:displayText];
+    
+    id currentLineId = renderPayload[@"lineId"];
+    id previousLineId = objc_getAssociatedObject(self, @selector(previousLineId));
+    if (currentLineId && previousLineId) {
+        if (![currentLineId isEqual:previousLineId]) {
+            lineChanged = YES;
+        }
+    }
+
     if (attrDisplayText) {
         contentChanged = ![self.attributedText isEqualToAttributedString:attrDisplayText];
     } else {
@@ -1944,6 +1960,11 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     }
 
     objc_setAssociatedObject(self, @selector(_amlApplyCurrentLyric), displayText, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    if (currentLineId) {
+        objc_setAssociatedObject(self, @selector(previousLineId), currentLineId, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        objc_setAssociatedObject(self, @selector(previousLineId), nil, OBJC_ASSOCIATION_ASSIGN);
+    }
     objc_setAssociatedObject(self, kDateLyricsLabelShowingLyricKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     if (contentChanged) {
@@ -2051,34 +2072,6 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
             if (DateLyricsIsSpringBoardHost()) {
                 gDateLyricsCurrentPayload = [(DateLyricsStoredPayload() ?: @{}) copy];
                 DateLyricsApplyCurrentLineToAllCoverSheets();
-            } else if (DateLyricsIsMusicHost()) {
-                if (gNowPlayingInfoCenter) {
-                    MPNowPlayingContentItem *currentItem = [gNowPlayingInfoCenter nowPlayingContentItem];
-                    if (currentItem) {
-                        BOOL isTrulyPlaying = YES;
-                        if (gNowPlayingInfoCenter && [gNowPlayingInfoCenter respondsToSelector:@selector(playbackState)]) {
-                            NSUInteger state = gNowPlayingInfoCenter.playbackState;
-                            if (state == 2 || state == 3) {
-                                isTrulyPlaying = NO;
-                            }
-                        }
-                        
-                        float rate = 1.0f;
-                        if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
-                            rate = [currentItem.amlPlaybackRate floatValue];
-                        } else if ([currentItem respondsToSelector:@selector(playbackRate)]) {
-                            rate = currentItem.playbackRate;
-                        }
-                        
-                        if (rate == 0.0f) {
-                            isTrulyPlaying = NO;
-                        }
-                        
-                        currentItem.amlCurrentPayloadSignature = nil;
-                        double elapsed = [currentItem calculatedElapsedTime];
-                        [currentItem setElapsedTime:elapsed playbackRate:(isTrulyPlaying ? rate : 0.0f)];
-                    }
-                }
             }
         }
     };

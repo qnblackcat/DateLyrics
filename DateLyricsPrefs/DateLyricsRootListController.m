@@ -5,6 +5,144 @@
 
 extern char **environ;
 
+// ---------------------------------------------------------------------------
+// Lightweight TTML preview parser
+// ---------------------------------------------------------------------------
+@interface DateLyricsPreviewWord : NSObject
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, assign) BOOL isBackground;
+@property (nonatomic, assign) double beginTime;
+@property (nonatomic, assign) double endTime;
+@end
+@implementation DateLyricsPreviewWord
+@end
+
+@interface DateLyricsPreviewLine : NSObject
+@property (nonatomic, copy) NSString *text;      // full assembled line text
+@property (nonatomic, copy) NSArray<NSValue *> *wordRanges;   // NSRange per word
+@property (nonatomic, copy) NSArray<NSNumber *> *wordIsBackground; // BOOL per word
+@property (nonatomic, assign) double beginTime;
+@property (nonatomic, assign) double endTime;
+@property (nonatomic, copy) NSArray<NSNumber *> *wordBeginTimes; // double per word
+@property (nonatomic, copy) NSArray<NSNumber *> *wordEndTimes;   // double per word
+@end
+@implementation DateLyricsPreviewLine
+@end
+
+@interface DateLyricsTTMLParser : NSObject <NSXMLParserDelegate>
+@property (nonatomic, strong) NSMutableArray<DateLyricsPreviewLine *> *lines;
+@property (nonatomic, strong) NSMutableArray<DateLyricsPreviewWord *> *currentWords;
+@property (nonatomic, assign) NSInteger backgroundDepth; // track x-bg nesting
+@property (nonatomic, assign) BOOL insideP;
+@property (nonatomic, assign) double currentPBegin;
+@property (nonatomic, assign) double currentPEnd;
+@property (nonatomic, assign) double currentSpanBegin;
+@property (nonatomic, assign) double currentSpanEnd;
+@end
+
+@implementation DateLyricsTTMLParser
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _lines = [NSMutableArray array];
+        _currentWords = [NSMutableArray array];
+        _backgroundDepth = 0;
+        _insideP = NO;
+        _currentPBegin = 0.0;
+        _currentPEnd = 0.0;
+        _currentSpanBegin = 0.0;
+        _currentSpanEnd = 0.0;
+    }
+    return self;
+}
+
+- (void)parser:(NSXMLParser *)parser didStartElement:(NSString *)elementName namespaceURI:(NSString *)namespaceURI qualifiedName:(NSString *)qName attributes:(NSDictionary<NSString *, NSString *> *)attributeDict {
+    if ([elementName isEqualToString:@"p"]) {
+        _insideP = YES;
+        [_currentWords removeAllObjects];
+        _backgroundDepth = 0;
+        _currentPBegin = [attributeDict[@"begin"] doubleValue];
+        _currentPEnd = [attributeDict[@"end"] doubleValue];
+    } else if ([elementName isEqualToString:@"span"] && _insideP) {
+        NSString *role = attributeDict[@"ttm:role"] ?: attributeDict[@"role"];
+        if ([role isEqualToString:@"x-bg"]) {
+            _backgroundDepth++;
+        }
+        if (attributeDict[@"begin"]) {
+            _currentSpanBegin = [attributeDict[@"begin"] doubleValue];
+        } else {
+            _currentSpanBegin = 0.0;
+        }
+        if (attributeDict[@"end"]) {
+            _currentSpanEnd = [attributeDict[@"end"] doubleValue];
+        } else {
+            _currentSpanEnd = 0.0;
+        }
+    }
+}
+
+- (void)parser:(NSXMLParser *)parser foundCharacters:(NSString *)string {
+    if (!_insideP) return;
+    NSString *trimmed = [string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) return;
+    DateLyricsPreviewWord *word = [[DateLyricsPreviewWord alloc] init];
+    word.text = trimmed;
+    word.isBackground = (_backgroundDepth > 0);
+    word.beginTime = _currentSpanBegin;
+    word.endTime = _currentSpanEnd;
+    [_currentWords addObject:word];
+}
+
+- (void)parser:(NSXMLParser *)parser didEndElement:(NSString *)elementName namespaceURI:(NSString *)namespaceURI qualifiedName:(NSString *)qName {
+    if ([elementName isEqualToString:@"span"] && _insideP && _backgroundDepth > 0) {
+        _backgroundDepth--;
+    } else if ([elementName isEqualToString:@"p"] && _insideP) {
+        _insideP = NO;
+        if (_currentWords.count == 0) return;
+
+        // Assemble the full line text and compute word ranges
+        NSMutableString *text = [NSMutableString string];
+        NSMutableArray<NSValue *> *ranges = [NSMutableArray array];
+        NSMutableArray<NSNumber *> *bgFlags = [NSMutableArray array];
+        NSMutableArray<NSNumber *> *wordBegins = [NSMutableArray array];
+        NSMutableArray<NSNumber *> *wordEnds = [NSMutableArray array];
+        for (DateLyricsPreviewWord *word in _currentWords) {
+            if (text.length > 0) [text appendString:@" "];
+            NSRange range = NSMakeRange(text.length, word.text.length);
+            [text appendString:word.text];
+            [ranges addObject:[NSValue valueWithRange:range]];
+            [bgFlags addObject:@(word.isBackground)];
+            [wordBegins addObject:@(word.beginTime)];
+            [wordEnds addObject:@(word.endTime)];
+        }
+
+        DateLyricsPreviewLine *line = [[DateLyricsPreviewLine alloc] init];
+        line.text = [text copy];
+        line.wordRanges = [ranges copy];
+        line.wordIsBackground = [bgFlags copy];
+        line.beginTime = _currentPBegin;
+        line.endTime = _currentPEnd;
+        line.wordBeginTimes = [wordBegins copy];
+        line.wordEndTimes = [wordEnds copy];
+        [_lines addObject:line];
+    }
+}
+
+@end
+
+static NSArray<DateLyricsPreviewLine *> *DateLyricsLoadPreviewLines(void) {
+    NSString *path = [[NSBundle bundleForClass:NSClassFromString(@"DateLyricsRootListController")] pathForResource:@"preview" ofType:@"xml"];
+    if (!path) return nil;
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return nil;
+    DateLyricsTTMLParser *delegate = [[DateLyricsTTMLParser alloc] init];
+    NSXMLParser *parser = [[NSXMLParser alloc] initWithData:data];
+    parser.delegate = delegate;
+    [parser parse];
+    return delegate.lines.count > 0 ? [delegate.lines copy] : nil;
+}
+
 static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
 static NSString *const kDateLyricsBridgeFilePath = @"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.current-line.txt";
 static NSString *const kDateLyricsLegacyBridgeFilePath = @"/var/mobile/Library/Preferences/com.82flex.amlyrics.current-line.txt";
@@ -107,6 +245,8 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 @property (nonatomic, strong) NSTimer *previewAnimationTimer;
 @property (nonatomic, assign) NSInteger previewLineIndex;
 @property (nonatomic, assign) NSInteger previewWordIndex;
+@property (nonatomic, strong) NSArray<DateLyricsPreviewLine *> *previewLines;
+@property (nonatomic, assign) NSTimeInterval previewStartTime;
 @end
 
 @interface DateLyricsFontListController ()
@@ -114,15 +254,13 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 @implementation DateLyricsRootListController
 
-- (void)amlAnimatePreview {
+- (void)amlAnimatePreviewFromLine:(NSInteger)fromLine toLine:(NSInteger)toLine withWord:(NSInteger)word {
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL transitionsEnabled = [prefs[@"TransitionsEnabled"] boolValue];
 	
-	NSInteger oldLineIndex = self.previewLineIndex;
-	self.previewLineIndex = (self.previewLineIndex + 1) % 2;
-	self.previewWordIndex = -1;
-
 	if (!transitionsEnabled || !self.mainPreviewLabel) {
+		self.previewLineIndex = toLine;
+		self.previewWordIndex = word;
 		[self amlRefreshMainPreview];
 		return;
 	}
@@ -133,20 +271,23 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	UILabel *currentLabel = self.mainPreviewLabel;
 	UILabel *nextLabel = [[UILabel alloc] initWithFrame:currentLabel.frame];
 	
-	NSInteger actualLine = self.previewLineIndex;
-	NSInteger actualWord = self.previewWordIndex;
-	
-	self.previewLineIndex = actualLine;
-	self.previewWordIndex = actualWord;
+	// 1. Render the new line (target state) to nextLabel
+	self.previewLineIndex = toLine;
+	self.previewWordIndex = word;
 	[self amlRefreshMainPreview];
 	nextLabel.attributedText = currentLabel.attributedText;
 	
-	self.previewLineIndex = oldLineIndex;
-	self.previewWordIndex = 2;
+	// 2. Render the old line (completed state) back to currentLabel
+	self.previewLineIndex = fromLine;
+	// Set word index to the last word of the old line so it appears completed during fade out
+	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
+	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
+	self.previewWordIndex = fromWordCount - 1;
 	[self amlRefreshMainPreview];
 	
-	self.previewLineIndex = actualLine;
-	self.previewWordIndex = actualWord;
+	// 3. Restore the target indexes so they are in sync
+	self.previewLineIndex = toLine;
+	self.previewWordIndex = word;
 
 	nextLabel.textAlignment = currentLabel.textAlignment;
 	nextLabel.adjustsFontSizeToFitWidth = currentLabel.adjustsFontSizeToFitWidth;
@@ -180,18 +321,63 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 					 }];
 }
 
-- (void)amlPreviewStep {
-	self.previewWordIndex++;
-	if (self.previewWordIndex > 2) {
-		[self amlAnimatePreview];
-	} else {
+- (void)amlPreviewTimerTick {
+	if (!self.previewLines || self.previewLines.count == 0) return;
+
+	NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
+
+	// Resolve current line
+	NSInteger resolvedLineIndex = 0;
+	for (NSInteger i = 0; i < self.previewLines.count; i++) {
+		if (timeInSong >= self.previewLines[i].beginTime) {
+			resolvedLineIndex = i;
+		} else {
+			break;
+		}
+	}
+
+	// Resolve current word
+	NSDictionary *prefs = DateLyricsCurrentPrefs();
+	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
+	DateLyricsPreviewLine *previewLine = self.previewLines[resolvedLineIndex];
+	NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
+	NSMutableArray<NSNumber *> *visibleWordEnds = [NSMutableArray array];
+	for (NSUInteger i = 0; i < previewLine.wordRanges.count; i++) {
+		BOOL isBg = [previewLine.wordIsBackground[i] boolValue];
+		if (isBg && !showAdlibs) continue;
+		[visibleWordBegins addObject:previewLine.wordBeginTimes[i]];
+		[visibleWordEnds addObject:previewLine.wordEndTimes[i]];
+	}
+
+	NSInteger resolvedWordIndex = -1;
+	if (timeInSong >= previewLine.beginTime) {
+		for (NSInteger i = 0; i < visibleWordBegins.count; i++) {
+			double wBegin = [visibleWordBegins[i] doubleValue];
+			if (timeInSong >= wBegin) {
+				resolvedWordIndex = i;
+			}
+		}
+	}
+
+	// Check if line changed
+	if (resolvedLineIndex != self.previewLineIndex) {
+		NSInteger oldLineIndex = self.previewLineIndex;
+		[self amlAnimatePreviewFromLine:oldLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex];
+	} else if (resolvedWordIndex != self.previewWordIndex) {
+		self.previewWordIndex = resolvedWordIndex;
 		[self amlRefreshMainPreview];
 	}
 }
 
 - (void)startPreviewAnimation {
 	[self stopPreviewAnimation];
-	self.previewAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.8 target:self selector:@selector(amlPreviewStep) userInfo:nil repeats:YES];
+	if (!self.previewLines) {
+		self.previewLines = DateLyricsLoadPreviewLines();
+	}
+	self.previewStartTime = [NSDate timeIntervalSinceReferenceDate];
+	self.previewLineIndex = 0;
+	self.previewWordIndex = -1;
+	self.previewAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 target:self selector:@selector(amlPreviewTimerTick) userInfo:nil repeats:YES];
 }
 
 - (void)stopPreviewAnimation {
@@ -307,8 +493,11 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 }
 
 - (void)amlRefreshMainPreview {
-        NSDictionary *prefs = DateLyricsCurrentPrefs();
+        if (!self.previewLines) {
+                self.previewLines = DateLyricsLoadPreviewLines();
+        }
 
+        NSDictionary *prefs = DateLyricsCurrentPrefs();
         self.mainPreviewLabel.alpha = 1.0;
 
         BOOL forceLowercase = [prefs[@"ForceLowercase"] boolValue];
@@ -316,26 +505,53 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         BOOL keepPastHighlighted = [prefs[@"HighlightTrail"] boolValue];
         NSInteger highlightStyle = [prefs[@"HighlightStyle"] integerValue];
         BOOL useCustomFont = [prefs[@"UseCustomFont"] boolValue];
+        BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
         CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
 
-        NSArray *lines = @[@"1 Test Lyric", @"Lyric Test 1"];
-        NSString *baseText = lines[self.previewLineIndex % lines.count];
-        if (forceLowercase) baseText = baseText.lowercaseString;
+        // Pick the current preview line from parsed TTML
+        DateLyricsPreviewLine *previewLine = nil;
+        NSArray<NSValue *> *wordRanges = nil;
+        NSString *baseText = nil;
 
-        NSArray *wordRanges;
-        if (self.previewLineIndex % lines.count == 0) {
-                wordRanges = @[
-                        [NSValue valueWithRange:NSMakeRange(0, 1)],
-                        [NSValue valueWithRange:NSMakeRange(2, 4)],
-                        [NSValue valueWithRange:NSMakeRange(7, 5)]
-                ];
+        if (self.previewLines.count > 0) {
+                NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
+                previewLine = self.previewLines[lineIdx];
+
+                // Filter out background words if Show Adlibs is off
+                NSMutableString *filteredText = [NSMutableString string];
+                NSMutableArray<NSValue *> *filteredRanges = [NSMutableArray array];
+                for (NSUInteger i = 0; i < previewLine.wordRanges.count; i++) {
+                        BOOL isBg = [previewLine.wordIsBackground[i] boolValue];
+                        if (isBg && !showAdlibs) continue;
+                        NSRange srcRange = [previewLine.wordRanges[i] rangeValue];
+                        NSString *word = [previewLine.text substringWithRange:srcRange];
+                        if (filteredText.length > 0) [filteredText appendString:@" "];
+                        NSRange newRange = NSMakeRange(filteredText.length, word.length);
+                        [filteredText appendString:word];
+                        [filteredRanges addObject:[NSValue valueWithRange:newRange]];
+                }
+                baseText = [filteredText copy];
+                wordRanges = [filteredRanges copy];
         } else {
-                wordRanges = @[
-                        [NSValue valueWithRange:NSMakeRange(0, 5)],
-                        [NSValue valueWithRange:NSMakeRange(6, 4)],
-                        [NSValue valueWithRange:NSMakeRange(11, 1)]
-                ];
+                // Fallback to hardcoded strings if TTML unavailable
+                NSArray *fallback = @[@"1 Test Lyric", @"Lyric Test 1"];
+                baseText = fallback[self.previewLineIndex % fallback.count];
+                if (self.previewLineIndex % 2 == 0) {
+                        wordRanges = @[
+                                [NSValue valueWithRange:NSMakeRange(0, 1)],
+                                [NSValue valueWithRange:NSMakeRange(2, 4)],
+                                [NSValue valueWithRange:NSMakeRange(7, 5)]
+                        ];
+                } else {
+                        wordRanges = @[
+                                [NSValue valueWithRange:NSMakeRange(0, 5)],
+                                [NSValue valueWithRange:NSMakeRange(6, 4)],
+                                [NSValue valueWithRange:NSMakeRange(11, 1)]
+                        ];
+                }
         }
+
+        if (forceLowercase) baseText = baseText.lowercaseString;
 
         NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:baseText];
         UIFont *font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightSemibold];
@@ -346,30 +562,27 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         }
         [attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
         [attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
+        [attributed addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, attributed.length)];
 
-        if (wordHighlighting) {
-                BOOL hasActiveWord = (self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count);
+        if (wordHighlighting && wordRanges.count > 0) {
+                NSInteger wordIdx = self.previewWordIndex;
+                BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 
                 if (highlightStyle == 2) {
                         UIColor *textColor = [UIColor labelColor];
                         UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
                         [attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-                        
                         if (hasActiveWord) {
-                                NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-                                NSRange highlightRange = activeRange;
-                                if (keepPastHighlighted) {
-                                        highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+                                NSRange activeRange = [wordRanges[wordIdx] rangeValue];
+                                NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
+                                if (NSMaxRange(highlightRange) <= attributed.length) {
+                                        [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
                                 }
-                                [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
                         }
                 } else if (hasActiveWord) {
-                        NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-                        NSRange highlightRange = activeRange;
-                        if (keepPastHighlighted) {
-                                highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
-                        }
-
+                        NSRange activeRange = [wordRanges[wordIdx] rangeValue];
+                        NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
+                        if (NSMaxRange(highlightRange) > attributed.length) highlightRange = NSMakeRange(0, attributed.length);
                         if (highlightStyle == 1) {
                                 NSString *substring = [baseText substringWithRange:highlightRange];
                                 [attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
@@ -537,6 +750,31 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	}
 }
 
+- (void)amlKillMusic {
+	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+	[haptic impactOccurred];
+
+	NSArray<NSArray<NSString *> *> *commands = @[
+		@[ @"/var/jb/usr/bin/killall", @"-9", @"Music" ],
+		@[ @"/usr/bin/killall", @"-9", @"Music" ],
+		@[ @"/bin/killall", @"-9", @"Music" ]
+	];
+
+	for (NSArray<NSString *> *command in commands) {
+		if (![[NSFileManager defaultManager] isExecutableFileAtPath:command.firstObject]) continue;
+		pid_t pid;
+		size_t argc = command.count;
+		char *argv[argc + 1];
+		for (size_t i = 0; i < argc; i++) {
+			argv[i] = (char *)command[i].UTF8String;
+		}
+		argv[argc] = NULL;
+		if (posix_spawn(&pid, command.firstObject.UTF8String, NULL, NULL, argv, environ) == 0) {
+			return;
+		}
+	}
+}
+
 - (void)resetSettings {
 	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
 	[haptic impactOccurred];
@@ -649,6 +887,8 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 @property (nonatomic, strong) NSTimer *previewAnimationTimer;
 @property (nonatomic, assign) NSInteger previewLineIndex;
 @property (nonatomic, assign) NSInteger previewWordIndex;
+@property (nonatomic, strong) NSArray<DateLyricsPreviewLine *> *previewLines;
+@property (nonatomic, assign) NSTimeInterval previewStartTime;
 @end
 
 @implementation DateLyricsFontListController
@@ -660,63 +900,84 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 }
 
 - (void)amlUpdatePreviewLabel {
+	if (!self.previewLines) {
+		self.previewLines = DateLyricsLoadPreviewLines();
+	}
+
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL forceLowercase = [prefs[@"ForceLowercase"] boolValue];
 	BOOL wordHighlighting = [prefs[@"WordHighlighting"] boolValue];
 	BOOL keepPastHighlighted = [prefs[@"HighlightTrail"] boolValue];
 	NSInteger highlightStyle = [prefs[@"HighlightStyle"] integerValue];
+	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
 	CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
 	CGFloat minimumScale = [prefs[@"MinimumScale"] floatValue];
 
-	NSArray *lines = @[@"1 Test Lyric", @"Lyric Test 1"];
-	NSString *baseText = lines[self.previewLineIndex % lines.count];
-	if (forceLowercase) baseText = baseText.lowercaseString;
+	NSString *baseText = nil;
+	NSArray<NSValue *> *wordRanges = nil;
 
-	NSArray *wordRanges;
-	if (self.previewLineIndex % lines.count == 0) {
-		wordRanges = @[
-			[NSValue valueWithRange:NSMakeRange(0, 1)],
-			[NSValue valueWithRange:NSMakeRange(2, 4)],
-			[NSValue valueWithRange:NSMakeRange(7, 5)]
-		];
+	if (self.previewLines.count > 0) {
+		NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
+		DateLyricsPreviewLine *line = self.previewLines[lineIdx];
+		NSMutableString *filteredText = [NSMutableString string];
+		NSMutableArray<NSValue *> *filteredRanges = [NSMutableArray array];
+		for (NSUInteger i = 0; i < line.wordRanges.count; i++) {
+			BOOL isBg = [line.wordIsBackground[i] boolValue];
+			if (isBg && !showAdlibs) continue;
+			NSRange srcRange = [line.wordRanges[i] rangeValue];
+			NSString *word = [line.text substringWithRange:srcRange];
+			if (filteredText.length > 0) [filteredText appendString:@" "];
+			NSRange newRange = NSMakeRange(filteredText.length, word.length);
+			[filteredText appendString:word];
+			[filteredRanges addObject:[NSValue valueWithRange:newRange]];
+		}
+		baseText = [filteredText copy];
+		wordRanges = [filteredRanges copy];
 	} else {
-		wordRanges = @[
-			[NSValue valueWithRange:NSMakeRange(0, 5)],
-			[NSValue valueWithRange:NSMakeRange(6, 4)],
-			[NSValue valueWithRange:NSMakeRange(11, 1)]
-		];
+		NSArray *fallback = @[@"1 Test Lyric", @"Lyric Test 1"];
+		baseText = fallback[self.previewLineIndex % fallback.count];
+		if (self.previewLineIndex % 2 == 0) {
+			wordRanges = @[
+				[NSValue valueWithRange:NSMakeRange(0, 1)],
+				[NSValue valueWithRange:NSMakeRange(2, 4)],
+				[NSValue valueWithRange:NSMakeRange(7, 5)]
+			];
+		} else {
+			wordRanges = @[
+				[NSValue valueWithRange:NSMakeRange(0, 5)],
+				[NSValue valueWithRange:NSMakeRange(6, 4)],
+				[NSValue valueWithRange:NSMakeRange(11, 1)]
+			];
+		}
 	}
+
+	if (forceLowercase) baseText = baseText.lowercaseString;
 
 	NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:baseText];
 	NSString *fontName = [self amlSelectedFontName];
 	UIFont *font = [UIFont fontWithName:fontName size:20.0] ?: [UIFont systemFontOfSize:20.0 weight:UIFontWeightSemibold];
-	
 	[attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
 	[attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
+	[attributed addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, attributed.length)];
 
-	if (wordHighlighting) {
-		BOOL hasActiveWord = (self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count);
-
+	if (wordHighlighting && wordRanges.count > 0) {
+		NSInteger wordIdx = self.previewWordIndex;
+		BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 		if (highlightStyle == 2) {
 			UIColor *textColor = [UIColor labelColor];
 			UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
 			[attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-			
 			if (hasActiveWord) {
-				NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-				NSRange highlightRange = activeRange;
-				if (keepPastHighlighted) {
-					highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+				NSRange activeRange = [wordRanges[wordIdx] rangeValue];
+				NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
+				if (NSMaxRange(highlightRange) <= attributed.length) {
+					[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
 				}
-				[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
 			}
 		} else if (hasActiveWord) {
-			NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-			NSRange highlightRange = activeRange;
-			if (keepPastHighlighted) {
-				highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
-			}
-
+			NSRange activeRange = [wordRanges[wordIdx] rangeValue];
+			NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
+			if (NSMaxRange(highlightRange) > attributed.length) highlightRange = NSMakeRange(0, attributed.length);
 			if (highlightStyle == 1) {
 				NSString *substring = [baseText substringWithRange:highlightRange];
 				[attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
@@ -731,15 +992,13 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	self.previewLabel.attributedText = attributed;
 }
 
-- (void)amlAnimatePreview {
+- (void)amlAnimatePreviewFromLine:(NSInteger)fromLine toLine:(NSInteger)toLine withWord:(NSInteger)word {
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL transitionsEnabled = [prefs[@"TransitionsEnabled"] boolValue];
 	
-	NSInteger oldLineIndex = self.previewLineIndex;
-	self.previewLineIndex = (self.previewLineIndex + 1) % 2;
-	self.previewWordIndex = -1;
-
 	if (!transitionsEnabled || !self.previewLabel) {
+		self.previewLineIndex = toLine;
+		self.previewWordIndex = word;
 		[self amlUpdatePreviewLabel];
 		return;
 	}
@@ -752,20 +1011,22 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	nextLabel.minimumScaleFactor = currentLabel.minimumScaleFactor;
 	nextLabel.adjustsFontSizeToFitWidth = currentLabel.adjustsFontSizeToFitWidth;
 	
-	NSInteger actualLine = self.previewLineIndex;
-	NSInteger actualWord = self.previewWordIndex;
-	
-	self.previewLineIndex = actualLine;
-	self.previewWordIndex = actualWord;
+	// 1. Render the new line (target state) to nextLabel
+	self.previewLineIndex = toLine;
+	self.previewWordIndex = word;
 	[self amlUpdatePreviewLabel];
 	nextLabel.attributedText = currentLabel.attributedText;
 	
-	self.previewLineIndex = oldLineIndex;
-	self.previewWordIndex = 2;
+	// 2. Render the old line (completed state) back to currentLabel
+	self.previewLineIndex = fromLine;
+	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
+	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
+	self.previewWordIndex = fromWordCount - 1;
 	[self amlUpdatePreviewLabel];
 	
-	self.previewLineIndex = actualLine;
-	self.previewWordIndex = actualWord;
+	// 3. Restore the target indexes so they are in sync
+	self.previewLineIndex = toLine;
+	self.previewWordIndex = word;
 
 	nextLabel.textAlignment = currentLabel.textAlignment;
 	nextLabel.adjustsFontSizeToFitWidth = currentLabel.adjustsFontSizeToFitWidth;
@@ -799,18 +1060,63 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 					 }];
 }
 
-- (void)amlPreviewStep {
-	self.previewWordIndex++;
-	if (self.previewWordIndex > 2) {
-		[self amlAnimatePreview];
-	} else {
+- (void)amlPreviewTimerTick {
+	if (!self.previewLines || self.previewLines.count == 0) return;
+
+	NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
+
+	// Resolve current line
+	NSInteger resolvedLineIndex = 0;
+	for (NSInteger i = 0; i < self.previewLines.count; i++) {
+		if (timeInSong >= self.previewLines[i].beginTime) {
+			resolvedLineIndex = i;
+		} else {
+			break;
+		}
+	}
+
+	// Resolve current word
+	NSDictionary *prefs = DateLyricsCurrentPrefs();
+	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
+	DateLyricsPreviewLine *previewLine = self.previewLines[resolvedLineIndex];
+	NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
+	NSMutableArray<NSNumber *> *visibleWordEnds = [NSMutableArray array];
+	for (NSUInteger i = 0; i < previewLine.wordRanges.count; i++) {
+		BOOL isBg = [previewLine.wordIsBackground[i] boolValue];
+		if (isBg && !showAdlibs) continue;
+		[visibleWordBegins addObject:previewLine.wordBeginTimes[i]];
+		[visibleWordEnds addObject:previewLine.wordEndTimes[i]];
+	}
+
+	NSInteger resolvedWordIndex = -1;
+	if (timeInSong >= previewLine.beginTime) {
+		for (NSInteger i = 0; i < visibleWordBegins.count; i++) {
+			double wBegin = [visibleWordBegins[i] doubleValue];
+			if (timeInSong >= wBegin) {
+				resolvedWordIndex = i;
+			}
+		}
+	}
+
+	// Check if line changed
+	if (resolvedLineIndex != self.previewLineIndex) {
+		NSInteger oldLineIndex = self.previewLineIndex;
+		[self amlAnimatePreviewFromLine:oldLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex];
+	} else if (resolvedWordIndex != self.previewWordIndex) {
+		self.previewWordIndex = resolvedWordIndex;
 		[self amlUpdatePreviewLabel];
 	}
 }
 
 - (void)startPreviewAnimation {
 	[self stopPreviewAnimation];
-	self.previewAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.8 target:self selector:@selector(amlPreviewStep) userInfo:nil repeats:YES];
+	if (!self.previewLines) {
+		self.previewLines = DateLyricsLoadPreviewLines();
+	}
+	self.previewStartTime = [NSDate timeIntervalSinceReferenceDate];
+	self.previewLineIndex = 0;
+	self.previewWordIndex = -1;
+	self.previewAnimationTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 target:self selector:@selector(amlPreviewTimerTick) userInfo:nil repeats:YES];
 }
 
 - (void)stopPreviewAnimation {

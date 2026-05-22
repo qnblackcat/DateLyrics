@@ -391,6 +391,17 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Actions</string>
+			<key>footerText</key>
+			<string>Close Apple Music to apply font, style, and lyric changes. Music will relaunch automatically when you open it.</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Close Apple Music</string>
+			<key>action</key>
+			<string>amlKillMusic</string>
 		</dict>
 
 		<dict>
