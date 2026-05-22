@@ -49,6 +49,7 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @property (nonatomic, copy) NSString *amlCurrentLyricTitle;
 @property (nonatomic, copy) NSString *amlCurrentPayloadSignature;
 @property (assign, nonatomic) float playbackRate;
+@property (nonatomic, strong) NSNumber *amlPlaybackRate;
 - (NSTimeInterval)calculatedElapsedTime;
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
 @end
@@ -405,8 +406,14 @@ static void DateLyricsApplyLabelContent(_UIAnimatingLabel *label, NSString *disp
     if (attrDisplayText) {
         label.attributedText = attrDisplayText;
     } else {
-        label.attributedText = nil;
-        label.text = displayText;
+        UIColor *textColor = label.textColor ?: [UIColor whiteColor];
+        if ([textColor respondsToSelector:@selector(resolvedColorWithTraitCollection:)]) {
+            textColor = [textColor resolvedColorWithTraitCollection:label.traitCollection];
+        }
+        NSMutableAttributedString *cleanStr = [[NSMutableAttributedString alloc] initWithString:displayText ?: @""];
+        [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, cleanStr.length)];
+        [cleanStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, cleanStr.length)];
+        label.attributedText = cleanStr;
     }
 }
 
@@ -533,7 +540,7 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
     NSMutableArray<NSValue *> *wordRanges = [NSMutableArray array];
     [text enumerateSubstringsInRange:NSMakeRange(0, text.length)
                              options:NSStringEnumerationByWords
-                          usingBlock:^(__unused NSString *substring, NSRange substringRange, __unused NSRange enclosingRange, __unused BOOL *stop) {
+                           usingBlock:^(__unused NSString *substring, NSRange substringRange, __unused NSRange enclosingRange, __unused BOOL *stop) {
         [wordRanges addObject:[NSValue valueWithRange:substringRange]];
     }];
     if (wordRanges.count < 2) return nil;
@@ -1048,6 +1055,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 %property (nonatomic, strong) NSTimer *amlPauseTimer;
 %property (nonatomic, copy) NSString *amlCurrentLyricTitle;
 %property (nonatomic, copy) NSString *amlCurrentPayloadSignature;
+%property (nonatomic, strong) NSNumber *amlPlaybackRate;
 
 - (void)dealloc {
     [self.amlTimer invalidate];
@@ -1107,7 +1115,9 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         return;
     }
     float rate = 1.0f;
-    if ([self respondsToSelector:@selector(playbackRate)]) {
+    if (self.amlPlaybackRate != nil) {
+        rate = [self.amlPlaybackRate floatValue];
+    } else if ([self respondsToSelector:@selector(playbackRate)]) {
         rate = self.playbackRate;
     }
     double elapsedTime = [self calculatedElapsedTime];
@@ -1115,6 +1125,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 }
 
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)playbackRate {
+    self.amlPlaybackRate = @(playbackRate);
     %orig;
     [self.amlTimer invalidate];
     self.amlTimer = nil;
@@ -1253,11 +1264,25 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
                 backgroundActiveRange = NSMakeRange(backgroundActiveRangeSegmentStart, NSMaxRange(backgroundActiveRange) - backgroundActiveRangeSegmentStart);
             }
 
+            BOOL isLineFinished = YES;
+            NSTimeInterval minWordBegin = -1.0;
+            for (DateLyricsTimedWord *word in line.words) {
+                if (word.end > elapsedTime) {
+                    isLineFinished = NO;
+                }
+                if (minWordBegin < 0 || word.begin < minWordBegin) {
+                    minWordBegin = word.begin;
+                }
+            }
+            BOOL isLineStarted = (minWordBegin < 0) || (elapsedTime >= minWordBegin);
+
             NSDictionary *baseWordPayload = DateLyricsMakePayloadWithBackgroundRange(line.text, activeRange, backgroundActiveRange);
             NSMutableDictionary *mutableWordPayload = [(baseWordPayload ?: @{}) mutableCopy];
             if (mutableWordPayload.count > 0) {
                 DateLyricsSetRangeFields(mutableWordPayload, @"focus", focusForegroundRange);
                 DateLyricsSetRangeFields(mutableWordPayload, @"focusBg", focusBackgroundRange);
+                mutableWordPayload[@"started"] = @(isLineStarted);
+                mutableWordPayload[@"finished"] = @(isLineFinished);
                 wordPayload = [mutableWordPayload copy];
             } else {
                 wordPayload = nil;
@@ -1690,26 +1715,44 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     NSNumber *lenNum = renderPayload[@"len"];
     NSNumber *bgLocNum = renderPayload[@"bgLoc"];
     NSNumber *bgLenNum = renderPayload[@"bgLen"];
-    if (gDateLyricsWordHighlighting && locNum && lenNum) {
-        NSUInteger loc = locNum.unsignedIntegerValue;
-        NSUInteger len = lenNum.unsignedIntegerValue;
-        if (loc != NSNotFound && loc + len <= lyric.length) {
-            NSMutableAttributedString *mAttrStr = [[NSMutableAttributedString alloc] initWithString:lyric];
-            NSRange highlightRange = NSMakeRange(loc, len);
-            NSRange backgroundHighlightRange = NSMakeRange(NSNotFound, 0);
-            if (bgLocNum && bgLenNum) {
-                NSUInteger bgLoc = bgLocNum.unsignedIntegerValue;
-                NSUInteger bgLen = bgLenNum.unsignedIntegerValue;
-                if (bgLoc != NSNotFound && bgLoc + bgLen <= lyric.length && bgLen > 0) {
-                    backgroundHighlightRange = NSMakeRange(bgLoc, bgLen);
-                }
-            }
+    BOOL isTimed = [renderPayload[@"timed"] boolValue];
 
-            if (gDateLyricsHighlightStyle == 1) {
-                NSMutableArray<NSValue *> *ranges = [NSMutableArray arrayWithObject:[NSValue valueWithRange:highlightRange]];
-                if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
-                    [ranges addObject:[NSValue valueWithRange:backgroundHighlightRange]];
-                }
+    if (gDateLyricsWordHighlighting && (isTimed || (locNum && lenNum))) {
+        NSMutableAttributedString *mAttrStr = [[NSMutableAttributedString alloc] initWithString:lyric];
+        
+        UIColor *textColor = self.textColor ?: [UIColor whiteColor];
+        if ([textColor respondsToSelector:@selector(resolvedColorWithTraitCollection:)]) {
+            textColor = [textColor resolvedColorWithTraitCollection:self.traitCollection];
+        }
+        [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
+        [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
+
+        NSUInteger loc = locNum ? locNum.unsignedIntegerValue : NSNotFound;
+        NSUInteger len = lenNum ? lenNum.unsignedIntegerValue : 0;
+
+        NSRange highlightRange = NSMakeRange(NSNotFound, 0);
+        if (loc != NSNotFound && loc + len <= lyric.length) {
+            highlightRange = NSMakeRange(loc, len);
+        }
+
+        NSRange backgroundHighlightRange = NSMakeRange(NSNotFound, 0);
+        if (bgLocNum && bgLenNum) {
+            NSUInteger bgLoc = bgLocNum.unsignedIntegerValue;
+            NSUInteger bgLen = bgLenNum.unsignedIntegerValue;
+            if (bgLoc != NSNotFound && bgLoc + bgLen <= lyric.length && bgLen > 0) {
+                backgroundHighlightRange = NSMakeRange(bgLoc, bgLen);
+            }
+        }
+
+        if (gDateLyricsHighlightStyle == 1) {
+            NSMutableArray<NSValue *> *ranges = [NSMutableArray array];
+            if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
+                [ranges addObject:[NSValue valueWithRange:highlightRange]];
+            }
+            if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
+                [ranges addObject:[NSValue valueWithRange:backgroundHighlightRange]];
+            }
+            if (ranges.count > 0) {
                 [ranges sortUsingComparator:^NSComparisonResult(NSValue *a, NSValue *b) {
                     NSRange left = a.rangeValue;
                     NSRange right = b.rangeValue;
@@ -1722,27 +1765,54 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
                     NSString *syllable = [lyric substringWithRange:range];
                     [mAttrStr replaceCharactersInRange:range withString:[syllable uppercaseString]];
                 }
-            } else if (gDateLyricsHighlightStyle == 2) {
-                UIColor *textColor = self.textColor ?: [UIColor whiteColor];
-                UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, mAttrStr.length)];
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, mAttrStr.length)];
+                attrDisplayText = mAttrStr;
+            }
+        } else if (gDateLyricsHighlightStyle == 2) {
+            UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
 
+            BOOL finished = [renderPayload[@"finished"] boolValue];
+            BOOL started = renderPayload[@"started"] ? [renderPayload[@"started"] boolValue] : YES;
+
+            [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
+
+            if (finished) {
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
+            } else if (!started) {
                 [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
+            } else {
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
+                if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
+                    [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
+                }
                 if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
                     [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:backgroundHighlightRange];
                 }
-            } else {  
-                UIColor *textColor = self.textColor ?: [UIColor whiteColor];
-
+            }
+            attrDisplayText = mAttrStr;
+        } else {  
+            // Stroke style
+            if ((highlightRange.location != NSNotFound && highlightRange.length > 0) ||
+                (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0)) {
+                
                 [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
-                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@(-gDateLyricsStrokeWidth) range:highlightRange];
-                [mAttrStr addAttribute:NSStrokeColorAttributeName value:textColor range:highlightRange];
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
+                
+                if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
+                    [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@(-gDateLyricsStrokeWidth) range:highlightRange];
+                    [mAttrStr addAttribute:NSStrokeColorAttributeName value:textColor range:highlightRange];
+                }
                 if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
                     [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@(-gDateLyricsStrokeWidth) range:backgroundHighlightRange];
                     [mAttrStr addAttribute:NSStrokeColorAttributeName value:textColor range:backgroundHighlightRange];
                 }
+                attrDisplayText = mAttrStr;
+            } else if (isTimed) {
+                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
+                attrDisplayText = mAttrStr;
             }
-            attrDisplayText = mAttrStr;
         }
     }
 
@@ -1766,11 +1836,10 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         }
     }
 
-    BOOL usesSplitSegment = [renderPayload[@"splitApplied"] boolValue];
     self.font = configuredFont;
     self.numberOfLines = 1;
-    self.adjustsFontSizeToFitWidth = !usesSplitSegment;
-    self.minimumScaleFactor = usesSplitSegment ? 1.0 : gDateLyricsMinimumScale;
+    self.adjustsFontSizeToFitWidth = !isTimed;
+    self.minimumScaleFactor = isTimed ? 1.0 : gDateLyricsMinimumScale;
     self.lineBreakMode = NSLineBreakByTruncatingTail;
 
     BOOL contentChanged = NO;
@@ -1810,92 +1879,107 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 %end
 
 static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    CFPreferencesAppSynchronize((__bridge CFStringRef)@"com.shalamand3r.datelyrics");
+    void (^reloadBlock)(void) = ^{
+        CFPreferencesAppSynchronize((__bridge CFStringRef)@"com.shalamand3r.datelyrics");
 
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/jb/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
-    if (!prefs) {
-        prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
-    }
-
-    auto getPrefBool = ^BOOL(NSString *key, BOOL defaultVal) {
-        if (prefs && prefs[key]) return [prefs[key] boolValue];
-        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
-        return val ? [val boolValue] : defaultVal;
-    };
-
-    auto getPrefInteger = ^NSInteger(NSString *key, NSInteger defaultVal) {
-        if (prefs && prefs[key]) return [prefs[key] integerValue];
-        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
-        return val ? [val integerValue] : defaultVal;
-    };
-
-    auto getPrefFloat = ^CGFloat(NSString *key, CGFloat defaultVal) {
-        if (prefs && prefs[key]) return (CGFloat)[prefs[key] floatValue];
-        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
-        return val ? (CGFloat)[val floatValue] : defaultVal;
-    };
-
-    auto getPrefDouble = ^double(NSString *key, double defaultVal) {
-        if (prefs && prefs[key]) return [prefs[key] doubleValue];
-        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
-        return val ? [val doubleValue] : defaultVal;
-    };
-
-    auto getPrefString = ^NSString *(NSString *key, NSString *defaultVal) {
-        if (prefs && prefs[key]) return [prefs[key] copy];
-        id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
-        return val ? [val copy] : defaultVal;
-    };
-
-    gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
-    gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
-    gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
-    gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", NO);
-    gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 0);
-    gDateLyricsUseCustomFont = getPrefBool(@"UseCustomFont", NO);
-    gDateLyricsCustomFontName = getPrefString(@"CustomFontName", nil);
-    gDateLyricsTransitionsEnabled = getPrefBool(@"TransitionsEnabled", YES);
-    
-    NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleFade);
-    if (transitionStyle < DateLyricsTransitionStyleFade || transitionStyle > DateLyricsTransitionStylePop) {
-        transitionStyle = DateLyricsTransitionStyleFade;
-    }
-    gDateLyricsTransitionStyle = transitionStyle;
-    gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.28);
-    gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
-    gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", NO);
-    if (gDateLyricsSplitLongLines) {
-        gDateLyricsShowAdlibs = NO;
-    } else {
-        gDateLyricsShowAdlibs = getPrefBool(@"ShowAdlibs", YES);
-    }
-    gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
-    gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 3.0);
-
-    if (!gDateLyricsEnabled) {
-        if (DateLyricsIsSpringBoardHost()) {
-            gDateLyricsCurrentPayload = nil;
-            DateLyricsApplyCurrentLineToAllCoverSheets();
-        } else if (DateLyricsIsMusicHost()) {
-            DateLyricsPublishPayload(nil);
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/jb/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
+        if (!prefs) {
+            prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
         }
-    } else {
-        if (DateLyricsIsSpringBoardHost()) {
-            DateLyricsApplyCurrentLineToAllCoverSheets();
-        } else if (DateLyricsIsMusicHost()) {
-            if (gNowPlayingInfoCenter) {
-                MPNowPlayingContentItem *currentItem = [gNowPlayingInfoCenter nowPlayingContentItem];
-                if (currentItem) {
-                    currentItem.amlCurrentPayloadSignature = nil;
-                    double elapsed = [currentItem calculatedElapsedTime];
-                    float rate = 1.0f;
-                    if ([currentItem respondsToSelector:@selector(playbackRate)]) {
-                        rate = currentItem.playbackRate;
+
+        auto getPrefBool = ^BOOL(NSString *key, BOOL defaultVal) {
+            id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+            if (val) return [val boolValue];
+            if (prefs && prefs[key]) return [prefs[key] boolValue];
+            return defaultVal;
+        };
+
+        auto getPrefInteger = ^NSInteger(NSString *key, NSInteger defaultVal) {
+            id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+            if (val) return [val integerValue];
+            if (prefs && prefs[key]) return [prefs[key] integerValue];
+            return defaultVal;
+        };
+
+        auto getPrefFloat = ^CGFloat(NSString *key, CGFloat defaultVal) {
+            id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+            if (val) return (CGFloat)[val floatValue];
+            if (prefs && prefs[key]) return (CGFloat)[prefs[key] floatValue];
+            return defaultVal;
+        };
+
+        auto getPrefDouble = ^double(NSString *key, double defaultVal) {
+            id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+            if (val) return [val doubleValue];
+            if (prefs && prefs[key]) return [prefs[key] doubleValue];
+            return defaultVal;
+        };
+
+        auto getPrefString = ^NSString *(NSString *key, NSString *defaultVal) {
+            id val = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR("com.shalamand3r.datelyrics"));
+            if (val) return [val copy];
+            if (prefs && prefs[key]) return [prefs[key] copy];
+            return defaultVal;
+        };
+
+        gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
+        gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
+        gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
+        gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 0);
+        gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", NO);
+        gDateLyricsUseCustomFont = getPrefBool(@"UseCustomFont", NO);
+        gDateLyricsCustomFontName = getPrefString(@"CustomFontName", nil);
+        gDateLyricsTransitionsEnabled = getPrefBool(@"TransitionsEnabled", YES);
+        
+        NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleFade);
+        if (transitionStyle < DateLyricsTransitionStyleFade || transitionStyle > DateLyricsTransitionStylePop) {
+            transitionStyle = DateLyricsTransitionStyleFade;
+        }
+        gDateLyricsTransitionStyle = transitionStyle;
+        gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.28);
+        gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
+        gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", NO);
+        if (gDateLyricsSplitLongLines) {
+            gDateLyricsShowAdlibs = NO;
+        } else {
+            gDateLyricsShowAdlibs = getPrefBool(@"ShowAdlibs", YES);
+        }
+        gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
+        gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 3.0);
+
+        if (!gDateLyricsEnabled) {
+            if (DateLyricsIsSpringBoardHost()) {
+                gDateLyricsCurrentPayload = nil;
+                DateLyricsApplyCurrentLineToAllCoverSheets();
+            } else if (DateLyricsIsMusicHost()) {
+                DateLyricsPublishPayload(nil);
+            }
+        } else {
+            if (DateLyricsIsSpringBoardHost()) {
+                DateLyricsApplyCurrentLineToAllCoverSheets();
+            } else if (DateLyricsIsMusicHost()) {
+                if (gNowPlayingInfoCenter) {
+                    MPNowPlayingContentItem *currentItem = [gNowPlayingInfoCenter nowPlayingContentItem];
+                    if (currentItem) {
+                        currentItem.amlCurrentPayloadSignature = nil;
+                        double elapsed = [currentItem calculatedElapsedTime];
+                        float rate = 1.0f;
+                        if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
+                            rate = [currentItem.amlPlaybackRate floatValue];
+                        } else if ([currentItem respondsToSelector:@selector(playbackRate)]) {
+                            rate = currentItem.playbackRate;
+                        }
+                        [currentItem setElapsedTime:elapsed playbackRate:rate];
                     }
-                    [currentItem setElapsedTime:elapsed playbackRate:rate];
                 }
             }
         }
+    };
+
+    if ([NSThread isMainThread]) {
+        reloadBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), reloadBlock);
     }
 }
 

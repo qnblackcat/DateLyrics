@@ -73,8 +73,13 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         values[@"ForceLowercase"] = @([prefs boolForKey:@"ForceLowercase"]);
         values[@"WordHighlighting"] = @([prefs objectForKey:@"WordHighlighting"] ? [prefs boolForKey:@"WordHighlighting"] : YES);
-        values[@"HighlightTrail"] = @([prefs boolForKey:@"HighlightTrail"]);
-        values[@"HighlightStyle"] = @((NSInteger)[prefs integerForKey:@"HighlightStyle"]);
+        NSInteger highlightStyle = (NSInteger)[prefs integerForKey:@"HighlightStyle"];
+        BOOL highlightTrail = [prefs boolForKey:@"HighlightTrail"];
+        if (highlightStyle == 2) {
+                highlightTrail = YES;
+        }
+        values[@"HighlightTrail"] = @(highlightTrail);
+        values[@"HighlightStyle"] = @(highlightStyle);
         values[@"UseCustomFont"] = @([prefs boolForKey:@"UseCustomFont"]);
         values[@"TransitionsEnabled"] = @([prefs objectForKey:@"TransitionsEnabled"] ? [prefs boolForKey:@"TransitionsEnabled"] : YES);
         values[@"TransitionStyle"] = @((NSInteger)[prefs integerForKey:@"TransitionStyle"]);
@@ -201,6 +206,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		BOOL showsFontStyle = [prefs[@"UseCustomFont"] boolValue];
 		BOOL highlightingEnabled = [prefs[@"WordHighlighting"] boolValue];
 		BOOL showsStrokeSlider = highlightingEnabled && [prefs[@"HighlightStyle"] integerValue] == 0;
+		BOOL isOpacityStyle = highlightingEnabled && [prefs[@"HighlightStyle"] integerValue] == 2;
 		BOOL transitionsEnabled = prefs[@"TransitionsEnabled"] ? [prefs[@"TransitionsEnabled"] boolValue] : YES;
 		BOOL splitLongLinesEnabled = [prefs[@"SplitLongLines"] boolValue];
 
@@ -250,6 +256,10 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 			if ([specifierKey isEqualToString:@"ShowAdlibs"]) {
 				[spec setProperty:(splitLongLinesEnabled ? @NO : @YES) forKey:@"enabled"];
+			}
+
+			if ([specifierKey isEqualToString:@"HighlightTrail"]) {
+				[spec setProperty:(isOpacityStyle ? @NO : @YES) forKey:@"enabled"];
 			}
 		}
 
@@ -337,25 +347,36 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         [attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
         [attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
 
-        if (wordHighlighting && self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count) {
-                NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-                NSRange highlightRange = activeRange;
+        if (wordHighlighting) {
+                BOOL hasActiveWord = (self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count);
 
-                if (keepPastHighlighted) {
-                        highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
-                }
-
-                if (highlightStyle == 1) {
-                        NSString *substring = [baseText substringWithRange:highlightRange];
-                        [attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
-                } else if (highlightStyle == 2) {
+                if (highlightStyle == 2) {
                         UIColor *textColor = [UIColor labelColor];
                         UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
                         [attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-                        [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
-                } else {
-                        [attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
-                        [attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+                        
+                        if (hasActiveWord) {
+                                NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
+                                NSRange highlightRange = activeRange;
+                                if (keepPastHighlighted) {
+                                        highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+                                }
+                                [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
+                        }
+                } else if (hasActiveWord) {
+                        NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
+                        NSRange highlightRange = activeRange;
+                        if (keepPastHighlighted) {
+                                highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+                        }
+
+                        if (highlightStyle == 1) {
+                                NSString *substring = [baseText substringWithRange:highlightRange];
+                                [attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
+                        } else {
+                                [attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
+                                [attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+                        }
                 }
         }
 
@@ -447,6 +468,17 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 			if (adlibsSpec) {
 				[self setPreferenceValue:@NO specifier:adlibsSpec];
 			}
+		}
+	}
+
+	if ([key isEqualToString:@"HighlightStyle"]) {
+		if ([value integerValue] == 2) {
+			NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
+			[prefs setBool:YES forKey:@"HighlightTrail"];
+			[prefs synchronize];
+
+			CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightTrail", kCFBooleanTrue, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+			CFPreferencesAppSynchronize((__bridge CFStringRef)kDateLyricsPrefsSuite);
 		}
 	}
 
@@ -662,22 +694,36 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	[attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
 	[attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
 
-	if (wordHighlighting && self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count) {
-		NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
-		NSRange highlightRange = activeRange;
-		if (keepPastHighlighted) highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+	if (wordHighlighting) {
+		BOOL hasActiveWord = (self.previewWordIndex >= 0 && self.previewWordIndex < (NSInteger)wordRanges.count);
 
-		if (highlightStyle == 1) {
-			NSString *substring = [baseText substringWithRange:highlightRange];
-			[attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
-		} else if (highlightStyle == 2) {
+		if (highlightStyle == 2) {
 			UIColor *textColor = [UIColor labelColor];
 			UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
 			[attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-			[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
-		} else {
-			[attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
-			[attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+			
+			if (hasActiveWord) {
+				NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
+				NSRange highlightRange = activeRange;
+				if (keepPastHighlighted) {
+					highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+				}
+				[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
+			}
+		} else if (hasActiveWord) {
+			NSRange activeRange = [wordRanges[self.previewWordIndex] rangeValue];
+			NSRange highlightRange = activeRange;
+			if (keepPastHighlighted) {
+				highlightRange = NSMakeRange(0, activeRange.location + activeRange.length);
+			}
+
+			if (highlightStyle == 1) {
+				NSString *substring = [baseText substringWithRange:highlightRange];
+				[attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
+			} else {
+				[attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
+				[attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+			}
 		}
 	}
 

@@ -133,7 +133,7 @@
 			<key>id</key>
 			<string>HighlightStyleCell</string>
 			<key>default</key>
-			<integer>0</integer>
+			<integer>2</integer>
 			<key>defaults</key>
 			<string>com.shalamand3r.datelyrics</string>
 			<key>PostNotification</key>
@@ -144,15 +144,15 @@
 			<string>WordHighlighting</string>
 			<key>validTitles</key>
 			<array>
+				<string>Opacity</string>
 				<string>Stroke</string>
 				<string>Caps</string>
-				<string>Opacity</string>
 			</array>
 			<key>validValues</key>
 			<array>
+				<integer>2</integer>
 				<integer>0</integer>
 				<integer>1</integer>
-				<integer>2</integer>
 			</array>
 		</dict>
 
@@ -293,7 +293,7 @@
 				<key>label</key>
 				<string>Line Scaling</string>
 				<key>footerText</key>
-				<string>Adjust text size to ensure long lyric lines fit the screen. Split Long Lines only kicks in for songs with syllable/word timing data when a line would need to shrink past your minimum scale.</string>
+				<string>Adjust text size to ensure long regular lyric lines fit the screen. Syllable-timed lyrics do not scale down and will remain at full size, splitting automatically if Split Long Lines is enabled.</string>
 			</dict>
 
 			<dict>
