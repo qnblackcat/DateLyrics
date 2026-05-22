@@ -309,6 +309,25 @@
 				<string>com.shalamand3r.datelyrics</string>
 				<key>PostNotification</key>
 				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+				<key>id</key>
+				<string>SplitLongLines</string>
+			</dict>
+
+			<dict>
+				<key>cell</key>
+				<string>PSSwitchCell</string>
+				<key>key</key>
+				<string>ShowAdlibs</string>
+				<key>label</key>
+				<string>Show Adlibs</string>
+				<key>default</key>
+				<true/>
+				<key>defaults</key>
+				<string>com.shalamand3r.datelyrics</string>
+				<key>PostNotification</key>
+				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+				<key>id</key>
+				<string>ShowAdlibs</string>
 			</dict>
 
 			<dict>

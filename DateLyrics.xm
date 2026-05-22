@@ -147,6 +147,7 @@ static NSInteger gDateLyricsTransitionStyle = 0;
 static NSTimeInterval gDateLyricsTransitionDuration = 0.28;
 static CGFloat gDateLyricsStrokeWidth = 3.0;
 static BOOL gDateLyricsSplitLongLines = NO;
+static BOOL gDateLyricsShowAdlibs = YES;
 static CGFloat gDateLyricsMinimumScale = 0.55;
 static NSTimeInterval gDateLyricsPauseTimeout = 3.0;
 
@@ -431,6 +432,84 @@ static CGFloat DateLyricsMeasuredLineWidth(NSString *text, UIFont *font) {
     return ceil(CGRectGetWidth(rect));
 }
 
+static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origLine) {
+    if (!origLine) return nil;
+    if (gDateLyricsShowAdlibs) return origLine;
+
+    BOOL hasBackground = NO;
+    for (DateLyricsTimedWord *word in origLine.words) {
+        if (word.isBackground) {
+            hasBackground = YES;
+            break;
+        }
+    }
+    if (!hasBackground) {
+        return origLine;
+    }
+
+    DateLyricsTimedLine *filteredLine = [DateLyricsTimedLine new];
+    filteredLine.begin = origLine.begin;
+    filteredLine.end = origLine.end;
+
+    NSMutableArray<DateLyricsTimedWord *> *filteredWords = [NSMutableArray array];
+    NSMutableString *newText = [NSMutableString string];
+
+    for (DateLyricsTimedWord *word in origLine.words) {
+        if (word.isBackground) {
+            continue;
+        }
+        DateLyricsTimedWord *newWord = [DateLyricsTimedWord new];
+        newWord.begin = word.begin;
+        newWord.end = word.end;
+        newWord.background = NO;
+        newWord.text = word.text;
+        if (filteredWords.count == 0) {
+            newWord.separatorBefore = @"";
+        } else {
+            newWord.separatorBefore = word.separatorBefore.length > 0 ? word.separatorBefore : @" ";
+        }
+        [filteredWords addObject:newWord];
+
+        if (newWord.separatorBefore.length > 0) {
+            [newText appendString:newWord.separatorBefore];
+        }
+        if (newWord.text.length > 0) {
+            [newText appendString:newWord.text];
+        }
+    }
+
+    filteredLine.words = [filteredWords copy];
+    filteredLine.text = [newText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    if (filteredLine.text.length == 0 || filteredLine.words.count == 0) {
+        return nil;
+    }
+    return filteredLine;
+}
+
+static NSString *DateLyricsStripParentheses(NSString *text) {
+    if (!text) return nil;
+    if (gDateLyricsShowAdlibs) return text;
+
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"\\([^)]*\\)|\\[[^]]*\\]" options:0 error:nil];
+    });
+
+    NSString *stripped = [regex stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@""];
+    
+    static NSRegularExpression *spacesRegex = nil;
+    static dispatch_once_t spacesOnceToken;
+    dispatch_once(&spacesOnceToken, ^{
+        spacesRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    });
+    stripped = [spacesRegex stringByReplacingMatchesInString:stripped options:0 range:NSMakeRange(0, stripped.length) withTemplate:@" "];
+    stripped = [stripped stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    return stripped.length > 0 ? stripped : nil;
+}
+
 static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILabel *label, UIFont *baseFont) {
     if (!gDateLyricsSplitLongLines) return nil;
     if (![payload[@"timed"] boolValue]) return nil;
@@ -441,6 +520,9 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
     CGFloat maxWidth = CGRectGetWidth(label.bounds);
     if (maxWidth <= 1.0) {
         maxWidth = CGRectGetWidth(label.frame);
+    }
+    if (maxWidth <= 1.0) {
+        maxWidth = [UIScreen mainScreen].bounds.size.width - 60.0;
     }
     if (maxWidth <= 1.0) return nil;
 
@@ -497,15 +579,42 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
     NSRange focusRange = DateLyricsRangeFromPayload(payload, @"focus", text.length);
     NSRange focusBackgroundRange = DateLyricsRangeFromPayload(payload, @"focusBg", text.length);
 
+    static char kDateLyricsLastTargetIndexKey;
+    static char kDateLyricsLastSplitTextKey;
+
     NSUInteger targetIndex = 0;
+    BOOL foundTarget = NO;
     for (NSUInteger idx = 0; idx < segmentRanges.count; idx++) {
         NSRange segmentRange = [segmentRanges[idx] rangeValue];
         BOOL containsHighlight = focusRange.location != NSNotFound && NSIntersectionRange(segmentRange, focusRange).length > 0;
         BOOL containsBackground = focusBackgroundRange.location != NSNotFound && NSIntersectionRange(segmentRange, focusBackgroundRange).length > 0;
         if (containsHighlight || containsBackground) {
             targetIndex = idx;
+            foundTarget = YES;
             break;
         }
+    }
+
+    if (!foundTarget) {
+        NSString *lastText = objc_getAssociatedObject(label, &kDateLyricsLastSplitTextKey);
+        if ([lastText isEqualToString:text]) {
+            NSNumber *lastIdxNum = objc_getAssociatedObject(label, &kDateLyricsLastTargetIndexKey);
+            if (lastIdxNum) {
+                NSUInteger lastIdx = lastIdxNum.unsignedIntegerValue;
+                if (lastIdx < segmentRanges.count) {
+                    targetIndex = lastIdx;
+                    foundTarget = YES;
+                }
+            }
+        }
+    }
+
+    if (foundTarget) {
+        objc_setAssociatedObject(label, &kDateLyricsLastSplitTextKey, text, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(label, &kDateLyricsLastTargetIndexKey, @(targetIndex), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        objc_setAssociatedObject(label, &kDateLyricsLastSplitTextKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(label, &kDateLyricsLastTargetIndexKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
     NSRange targetRange = [segmentRanges[targetIndex] rangeValue];
@@ -1038,7 +1147,9 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
     pthread_mutex_lock(&gLyricsCacheMutex);
     
     NSArray<DateLyricsTimedLine *> *wordLines = gWordLyricsCache[@(storeID)];
-    for (DateLyricsTimedLine *line in [wordLines reverseObjectEnumerator]) {
+    for (DateLyricsTimedLine *origLine in [wordLines reverseObjectEnumerator]) {
+        DateLyricsTimedLine *line = DateLyricsGetFilteredLine(origLine);
+        if (!line) continue;
         if (elapsedTime >= line.begin) {
             title = line.text;
             NSRange activeRange = NSMakeRange(NSNotFound, 0);
@@ -1167,11 +1278,13 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         if (elapsedTime >= line.startTime) {
             if (!title.length) {
                 id lyricsText = [line respondsToSelector:@selector(lyricsText)] ? [line performSelector:@selector(lyricsText)] : nil;
+                NSString *rawTitle = nil;
                 if ([lyricsText isKindOfClass:[NSAttributedString class]]) {
-                    title = [lyricsText string];
+                    rawTitle = [lyricsText string];
                 } else if ([lyricsText isKindOfClass:[NSString class]]) {
-                    title = (NSString *)lyricsText;
+                    rawTitle = (NSString *)lyricsText;
                 }
+                title = DateLyricsStripParentheses(rawTitle);
             }
             break;
         } else {
@@ -1751,6 +1864,11 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
     gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.28);
     gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
     gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", NO);
+    if (gDateLyricsSplitLongLines) {
+        gDateLyricsShowAdlibs = NO;
+    } else {
+        gDateLyricsShowAdlibs = getPrefBool(@"ShowAdlibs", YES);
+    }
     gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
     gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 3.0);
 

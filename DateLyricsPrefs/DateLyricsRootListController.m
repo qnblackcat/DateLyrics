@@ -86,6 +86,8 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         if ([fontName isKindOfClass:NSString.class]) values[@"CustomFontName"] = fontName;
         id strokeValue = [prefs objectForKey:@"StrokeWidth"];
         values[@"StrokeWidth"] = strokeValue ?: @3.0;
+        values[@"SplitLongLines"] = @([prefs boolForKey:@"SplitLongLines"]);
+        values[@"ShowAdlibs"] = @([prefs objectForKey:@"ShowAdlibs"] ? [prefs boolForKey:@"ShowAdlibs"] : YES);
         return values;
 }
 @interface LSApplicationProxy : NSObject
@@ -200,6 +202,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		BOOL highlightingEnabled = [prefs[@"WordHighlighting"] boolValue];
 		BOOL showsStrokeSlider = highlightingEnabled && [prefs[@"HighlightStyle"] integerValue] == 0;
 		BOOL transitionsEnabled = prefs[@"TransitionsEnabled"] ? [prefs[@"TransitionsEnabled"] boolValue] : YES;
+		BOOL splitLongLinesEnabled = [prefs[@"SplitLongLines"] boolValue];
 
 		NSIndexSet *fontIndexes = [specs indexesOfObjectsPassingTest:^BOOL(PSSpecifier *spec, NSUInteger idx, BOOL *stop) {
 			return [[[spec propertyForKey:@"key"] description] isEqualToString:@"CustomFontName"] && !showsFontStyle;
@@ -243,6 +246,10 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 			if ([specifierKey isEqualToString:@"CustomFontName"]) {
 				[spec setProperty:@"titlesDataSource:" forKey:@"titlesDataSource"];
 				[spec setProperty:@"valuesDataSource:" forKey:@"valuesDataSource"];
+			}
+
+			if ([specifierKey isEqualToString:@"ShowAdlibs"]) {
+				[spec setProperty:(splitLongLinesEnabled ? @NO : @YES) forKey:@"enabled"];
 			}
 		}
 
@@ -430,11 +437,26 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	[haptic impactOccurred];
 
 	NSString *key = [specifier propertyForKey:@"key"];
+	if ([key isEqualToString:@"SplitLongLines"]) {
+		if ([value boolValue]) {
+			NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
+			[prefs setBool:NO forKey:@"ShowAdlibs"];
+			[prefs synchronize];
+
+			PSSpecifier *adlibsSpec = [self specifierForID:@"ShowAdlibs"];
+			if (adlibsSpec) {
+				[self setPreferenceValue:@NO specifier:adlibsSpec];
+			}
+		}
+	}
+
 	if ([key isEqualToString:@"HighlightStyle"] ||
 	        [key isEqualToString:@"WordHighlighting"] ||
 	        [key isEqualToString:@"UseCustomFont"] ||
 	        [key isEqualToString:@"TransitionsEnabled"] ||
-	        [key isEqualToString:@"MinimumScale"]) {
+	        [key isEqualToString:@"MinimumScale"] ||
+	        [key isEqualToString:@"SplitLongLines"] ||
+	        [key isEqualToString:@"ShowAdlibs"]) {
 
 	        _specifiers = nil;
 	        [self reloadSpecifiers];
