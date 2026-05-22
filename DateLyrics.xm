@@ -71,6 +71,7 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 
 @interface MPNowPlayingInfoCenter (Private)
 - (MPNowPlayingContentItem *)nowPlayingContentItem;
+@property (nonatomic, assign) NSUInteger playbackState;
 @end
 
 @interface LSApplicationProxy : NSObject
@@ -443,9 +444,30 @@ static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origL
     if (!origLine) return nil;
     if (gDateLyricsShowAdlibs) return origLine;
 
+    NSMutableIndexSet *parenthesizedIndices = [NSMutableIndexSet indexSet];
+    BOOL insideParens = NO;
+    for (NSUInteger i = 0; i < origLine.words.count; i++) {
+        DateLyricsTimedWord *word = origLine.words[i];
+        NSString *wText = word.text;
+        NSString *sepBefore = word.separatorBefore;
+        
+        if ([wText hasPrefix:@"("] || [wText hasPrefix:@"["] || [sepBefore containsString:@"("] || [sepBefore containsString:@"["]) {
+            insideParens = YES;
+        }
+        
+        if (insideParens) {
+            [parenthesizedIndices addIndex:i];
+        }
+        
+        if ([wText hasSuffix:@")"] || [wText hasSuffix:@"]"]) {
+            insideParens = NO;
+        }
+    }
+
     BOOL hasBackground = NO;
-    for (DateLyricsTimedWord *word in origLine.words) {
-        if (word.isBackground) {
+    for (NSUInteger i = 0; i < origLine.words.count; i++) {
+        DateLyricsTimedWord *word = origLine.words[i];
+        if (word.isBackground || [parenthesizedIndices containsIndex:i]) {
             hasBackground = YES;
             break;
         }
@@ -461,19 +483,35 @@ static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origL
     NSMutableArray<DateLyricsTimedWord *> *filteredWords = [NSMutableArray array];
     NSMutableString *newText = [NSMutableString string];
 
-    for (DateLyricsTimedWord *word in origLine.words) {
-        if (word.isBackground) {
+    for (NSUInteger i = 0; i < origLine.words.count; i++) {
+        DateLyricsTimedWord *word = origLine.words[i];
+        if (word.isBackground || [parenthesizedIndices containsIndex:i]) {
             continue;
         }
         DateLyricsTimedWord *newWord = [DateLyricsTimedWord new];
         newWord.begin = word.begin;
         newWord.end = word.end;
         newWord.background = NO;
-        newWord.text = word.text;
+        
+        // Strip any residual parenthesis characters if they were on the word boundaries
+        NSString *wordText = word.text;
+        NSString *sepBefore = word.separatorBefore;
+        if ([wordText hasPrefix:@"("]) wordText = [wordText substringFromIndex:1];
+        if ([wordText hasPrefix:@"["]) wordText = [wordText substringFromIndex:1];
+        if ([wordText hasSuffix:@")"]) wordText = [wordText substringToIndex:wordText.length - 1];
+        if ([wordText hasSuffix:@"]"]) wordText = [wordText substringToIndex:wordText.length - 1];
+        newWord.text = wordText;
+
         if (filteredWords.count == 0) {
             newWord.separatorBefore = @"";
         } else {
-            newWord.separatorBefore = word.separatorBefore.length > 0 ? word.separatorBefore : @" ";
+            // Clean up any remaining parenthesis from the separator
+            NSString *cleanedSep = sepBefore;
+            cleanedSep = [cleanedSep stringByReplacingOccurrencesOfString:@"(" withString:@""];
+            cleanedSep = [cleanedSep stringByReplacingOccurrencesOfString:@"[" withString:@""];
+            cleanedSep = [cleanedSep stringByReplacingOccurrencesOfString:@")" withString:@""];
+            cleanedSep = [cleanedSep stringByReplacingOccurrencesOfString:@"]" withString:@""];
+            newWord.separatorBefore = cleanedSep.length > 0 ? cleanedSep : @" ";
         }
         [filteredWords addObject:newWord];
 
@@ -1109,9 +1147,21 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         }
     }
 
-    if (!storeID || (gNowPlayingInfoCenter && currentStoreID != storeID)) {
+    BOOL isTrulyPlaying = YES;
+    if (gNowPlayingInfoCenter && [gNowPlayingInfoCenter respondsToSelector:@selector(playbackState)]) {
+        NSUInteger state = gNowPlayingInfoCenter.playbackState;
+        if (state == 2 || state == 3) {
+            isTrulyPlaying = NO;
+        }
+    }
+
+    if (!storeID || (gNowPlayingInfoCenter && currentStoreID != storeID) || !isTrulyPlaying) {
         [timer invalidate];
         self.amlTimer = nil;
+        if (!isTrulyPlaying) {
+            double elapsedTime = [self calculatedElapsedTime];
+            [self setElapsedTime:MAX(0, elapsedTime) playbackRate:0.0f];
+        }
         return;
     }
     float rate = 1.0f;
@@ -1838,8 +1888,18 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
     self.font = configuredFont;
     self.numberOfLines = 1;
-    self.adjustsFontSizeToFitWidth = !isTimed;
-    self.minimumScaleFactor = isTimed ? 1.0 : gDateLyricsMinimumScale;
+    if (isTimed) {
+        if (gDateLyricsSplitLongLines) {
+            self.adjustsFontSizeToFitWidth = NO;
+            self.minimumScaleFactor = 1.0;
+        } else {
+            self.adjustsFontSizeToFitWidth = YES;
+            self.minimumScaleFactor = gDateLyricsMinimumScale;
+        }
+    } else {
+        self.adjustsFontSizeToFitWidth = YES;
+        self.minimumScaleFactor = gDateLyricsMinimumScale;
+    }
     self.lineBreakMode = NSLineBreakByTruncatingTail;
 
     BOOL contentChanged = NO;
@@ -1964,7 +2024,16 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
                         currentItem.amlCurrentPayloadSignature = nil;
                         double elapsed = [currentItem calculatedElapsedTime];
                         float rate = 1.0f;
-                        if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
+                        BOOL isTrulyPlaying = YES;
+                        if (gNowPlayingInfoCenter && [gNowPlayingInfoCenter respondsToSelector:@selector(playbackState)]) {
+                            NSUInteger state = gNowPlayingInfoCenter.playbackState;
+                            if (state == 2 || state == 3) {
+                                isTrulyPlaying = NO;
+                            }
+                        }
+                        if (!isTrulyPlaying) {
+                            rate = 0.0f;
+                        } else if ([currentItem respondsToSelector:@selector(amlPlaybackRate)] && currentItem.amlPlaybackRate != nil) {
                             rate = [currentItem.amlPlaybackRate floatValue];
                         } else if ([currentItem respondsToSelector:@selector(playbackRate)]) {
                             rate = currentItem.playbackRate;
