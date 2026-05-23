@@ -263,7 +263,106 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 @implementation DateLyricsRootListController
 
+- (NSUInteger)amlSegmentIndexForLine:(NSInteger)lineIdx word:(NSInteger)wordIdx {
+        if (!self.previewLines || self.previewLines.count == 0) return 0;
+        NSInteger actualLineIdx = lineIdx % (NSInteger)self.previewLines.count;
+        DateLyricsPreviewLine *previewLine = self.previewLines[actualLineIdx];
+
+        NSDictionary *prefs = DateLyricsCurrentPrefs();
+        BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
+        BOOL splitLongLines = [prefs[@"SplitLongLines"] boolValue];
+
+        if (!splitLongLines) return 0;
+
+        NSMutableString *filteredText = [NSMutableString string];
+        NSMutableArray<NSValue *> *filteredRanges = [NSMutableArray array];
+        for (NSUInteger i = 0; i < previewLine.wordRanges.count; i++) {
+                BOOL isBg = [previewLine.wordIsBackground[i] boolValue];
+                if (isBg && !showAdlibs) continue;
+                NSRange srcRange = [previewLine.wordRanges[i] rangeValue];
+                NSString *word = [previewLine.text substringWithRange:srcRange];
+                if (filteredText.length > 0) [filteredText appendString:@" "];
+                NSRange newRange = NSMakeRange(filteredText.length, word.length);
+                [filteredText appendString:word];
+                [filteredRanges addObject:[NSValue valueWithRange:newRange]];
+        }
+
+        NSString *baseText = [filteredText copy];
+        NSArray<NSValue *> *wordRanges = [filteredRanges copy];
+
+        if (baseText.length == 0 || wordRanges.count < 2) return 0;
+
+        UIFont *font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightSemibold];
+        BOOL useCustomFont = [prefs[@"UseCustomFont"] boolValue];
+        NSString *fontName = prefs[@"CustomFontName"];
+        if (useCustomFont && [fontName isKindOfClass:NSString.class] && fontName.length > 0) {
+                UIFont *customFont = [UIFont fontWithName:fontName size:20.0];
+                if (customFont) font = customFont;
+        }
+
+        CGFloat maxWidth = CGRectGetWidth(self.mainPreviewLabel.bounds);
+        if (maxWidth <= 1.0) {
+                maxWidth = CGRectGetWidth(self.mainPreviewLabel.frame);
+        }
+        if (maxWidth <= 1.0) {
+                maxWidth = [UIScreen mainScreen].bounds.size.width - 60.0;
+        }
+        if (maxWidth <= 1.0) return 0;
+
+        CGSize totalSize = [baseText sizeWithAttributes:@{NSFontAttributeName: font}];
+        if (totalSize.width <= maxWidth) return 0;
+
+        NSMutableArray<NSValue *> *segmentRanges = [NSMutableArray array];
+        NSMutableArray<NSValue *> *segmentWordIndexRanges = [NSMutableArray array];
+        NSUInteger segmentStart = 0;
+        NSUInteger segmentStartWordIdx = 0;
+        NSUInteger wordsInCurrentSegment = 0;
+
+        for (NSUInteger idx = 0; idx < wordRanges.count; idx++) {
+                NSRange wordRange = [wordRanges[idx] rangeValue];
+                if (wordsInCurrentSegment == 0) {
+                        wordsInCurrentSegment = 1;
+                        continue;
+                }
+
+                NSUInteger candidateEnd = NSMaxRange(wordRange);
+                NSString *candidateLine = [baseText substringWithRange:NSMakeRange(segmentStart, candidateEnd - segmentStart)];
+                CGSize candSize = [candidateLine sizeWithAttributes:@{NSFontAttributeName: font}];
+                if (candSize.width <= maxWidth) {
+                        wordsInCurrentSegment++;
+                        continue;
+                }
+
+                NSUInteger breakLocation = wordRange.location;
+                [segmentRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStart, breakLocation - segmentStart)]];
+                [segmentWordIndexRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStartWordIdx, idx - segmentStartWordIdx)]];
+                segmentStart = breakLocation;
+                segmentStartWordIdx = idx;
+                wordsInCurrentSegment = 1;
+        }
+
+        [segmentRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStart, baseText.length - segmentStart)]];
+        [segmentWordIndexRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStartWordIdx, wordRanges.count - segmentStartWordIdx)]];
+
+        if (wordIdx >= 0) {
+                for (NSUInteger idx = 0; idx < segmentWordIndexRanges.count; idx++) {
+                        NSRange wordIdxRange = [segmentWordIndexRanges[idx] rangeValue];
+                        if (wordIdx >= (NSInteger)wordIdxRange.location && wordIdx < (NSInteger)NSMaxRange(wordIdxRange)) {
+                                return idx;
+                        }
+                }
+        }
+
+        return 0;
+}
+
 - (void)amlAnimatePreviewFromLine:(NSInteger)fromLine toLine:(NSInteger)toLine withWord:(NSInteger)word {
+	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
+	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
+	[self amlAnimatePreviewFromLine:fromLine toLine:toLine withWord:word fromWord:fromWordCount - 1];
+}
+
+- (void)amlAnimatePreviewFromLine:(NSInteger)fromLine toLine:(NSInteger)toLine withWord:(NSInteger)word fromWord:(NSInteger)fromWord {
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL transitionsEnabled = [prefs[@"TransitionsEnabled"] boolValue];
 	
@@ -280,17 +379,12 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	UILabel *currentLabel = self.mainPreviewLabel;
 	UILabel *nextLabel = [[UILabel alloc] initWithFrame:currentLabel.frame];
 	
-	self.previewLineIndex = toLine;
-	self.previewWordIndex = word;
-	[self amlRefreshMainPreview];
-	nextLabel.attributedText = currentLabel.attributedText;
+	NSAttributedString *nextAttr = [self amlAttributedTextForLine:toLine word:word];
+	NSAttributedString *currentAttr = [self amlAttributedTextForLine:fromLine word:fromWord];
 	
-	self.previewLineIndex = fromLine;
-	NSInteger fromLineIdx = fromLine % (NSInteger)MAX(self.previewLines.count, 1);
-	NSInteger fromWordCount = (self.previewLines.count > 0) ? (NSInteger)self.previewLines[fromLineIdx].wordRanges.count : 3;
-	self.previewWordIndex = fromWordCount - 1;
-	[self amlRefreshMainPreview];
-	
+	currentLabel.attributedText = currentAttr;
+	nextLabel.attributedText = nextAttr;
+
 	self.previewLineIndex = toLine;
 	self.previewWordIndex = word;
 
@@ -366,8 +460,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		NSInteger oldLineIndex = self.previewLineIndex;
 		[self amlAnimatePreviewFromLine:oldLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex];
 	} else if (resolvedWordIndex != self.previewWordIndex) {
-		self.previewWordIndex = resolvedWordIndex;
-		[self amlRefreshMainPreview];
+		NSUInteger oldSeg = [self amlSegmentIndexForLine:self.previewLineIndex word:self.previewWordIndex];
+		NSUInteger newSeg = [self amlSegmentIndexForLine:resolvedLineIndex word:resolvedWordIndex];
+		if (oldSeg != newSeg) {
+			[self amlAnimatePreviewFromLine:self.previewLineIndex toLine:resolvedLineIndex withWord:resolvedWordIndex fromWord:self.previewWordIndex];
+		} else {
+			self.previewWordIndex = resolvedWordIndex;
+			[self amlRefreshMainPreview];
+		}
 	}
 }
 
@@ -494,14 +594,12 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	return cell;
 }
 
-- (void)amlRefreshMainPreview {
+- (NSAttributedString *)amlAttributedTextForLine:(NSInteger)lineIdx word:(NSInteger)wordIdx {
         if (!self.previewLines) {
                 self.previewLines = DateLyricsLoadPreviewLines();
         }
 
         NSDictionary *prefs = DateLyricsCurrentPrefs();
-        self.mainPreviewLabel.alpha = 1.0;
-
         BOOL forceLowercase = [prefs[@"ForceLowercase"] boolValue];
         BOOL wordHighlighting = [prefs[@"WordHighlighting"] boolValue];
         BOOL keepPastHighlighted = [prefs[@"HighlightTrail"] boolValue];
@@ -509,14 +607,16 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         BOOL useCustomFont = [prefs[@"UseCustomFont"] boolValue];
         BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
         CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
+        BOOL splitLongLines = [prefs[@"SplitLongLines"] boolValue];
 
         DateLyricsPreviewLine *previewLine = nil;
         NSArray<NSValue *> *wordRanges = nil;
         NSString *baseText = nil;
+        NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
 
         if (self.previewLines.count > 0) {
-                NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
-                previewLine = self.previewLines[lineIdx];
+                NSInteger actualLineIdx = lineIdx % (NSInteger)self.previewLines.count;
+                previewLine = self.previewLines[actualLineIdx];
 
                 NSMutableString *filteredText = [NSMutableString string];
                 NSMutableArray<NSValue *> *filteredRanges = [NSMutableArray array];
@@ -529,13 +629,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                         NSRange newRange = NSMakeRange(filteredText.length, word.length);
                         [filteredText appendString:word];
                         [filteredRanges addObject:[NSValue valueWithRange:newRange]];
+                        [visibleWordBegins addObject:previewLine.wordBeginTimes[i]];
                 }
                 baseText = [filteredText copy];
                 wordRanges = [filteredRanges copy];
         } else {
                 NSArray *fallback = @[@"1 Test Lyric", @"Lyric Test 1"];
-                baseText = fallback[self.previewLineIndex % fallback.count];
-                if (self.previewLineIndex % 2 == 0) {
+                baseText = fallback[lineIdx % fallback.count];
+                if (lineIdx % 2 == 0) {
                         wordRanges = @[
                                 [NSValue valueWithRange:NSMakeRange(0, 1)],
                                 [NSValue valueWithRange:NSMakeRange(2, 4)],
@@ -550,46 +651,103 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 }
         }
 
-        if (forceLowercase) baseText = baseText.lowercaseString;
-
-        NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:baseText];
         UIFont *font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightSemibold];
         NSString *fontName = prefs[@"CustomFontName"];
         if (useCustomFont && [fontName isKindOfClass:NSString.class] && fontName.length > 0) {
                 UIFont *customFont = [UIFont fontWithName:fontName size:20.0];
                 if (customFont) font = customFont;
         }
+
+        if (splitLongLines && baseText.length > 0 && wordRanges.count >= 2) {
+                CGFloat maxWidth = CGRectGetWidth(self.mainPreviewLabel.bounds);
+                if (maxWidth <= 1.0) {
+                        maxWidth = CGRectGetWidth(self.mainPreviewLabel.frame);
+                }
+                if (maxWidth <= 1.0) {
+                        maxWidth = [UIScreen mainScreen].bounds.size.width - 60.0;
+                }
+                if (maxWidth > 1.0) {
+                        CGSize totalSize = [baseText sizeWithAttributes:@{NSFontAttributeName: font}];
+                        if (totalSize.width > maxWidth) {
+                                NSMutableArray<NSValue *> *segmentRanges = [NSMutableArray array];
+                                NSMutableArray<NSValue *> *segmentWordIndexRanges = [NSMutableArray array];
+                                NSUInteger segmentStart = 0;
+                                NSUInteger segmentStartWordIdx = 0;
+                                NSUInteger wordsInCurrentSegment = 0;
+
+                                for (NSUInteger idx = 0; idx < wordRanges.count; idx++) {
+                                        NSRange wordRange = [wordRanges[idx] rangeValue];
+                                        if (wordsInCurrentSegment == 0) {
+                                                wordsInCurrentSegment = 1;
+                                                continue;
+                                        }
+
+                                        NSUInteger candidateEnd = NSMaxRange(wordRange);
+                                        NSString *candidateLine = [baseText substringWithRange:NSMakeRange(segmentStart, candidateEnd - segmentStart)];
+                                        CGSize candSize = [candidateLine sizeWithAttributes:@{NSFontAttributeName: font}];
+                                        if (candSize.width <= maxWidth) {
+                                                wordsInCurrentSegment++;
+                                                continue;
+                                        }
+
+                                        NSUInteger breakLocation = wordRange.location;
+                                        [segmentRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStart, breakLocation - segmentStart)]];
+                                        [segmentWordIndexRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStartWordIdx, idx - segmentStartWordIdx)]];
+                                        segmentStart = breakLocation;
+                                        segmentStartWordIdx = idx;
+                                        wordsInCurrentSegment = 1;
+                                }
+
+                                [segmentRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStart, baseText.length - segmentStart)]];
+                                [segmentWordIndexRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStartWordIdx, wordRanges.count - segmentStartWordIdx)]];
+
+                                if (segmentRanges.count >= 2) {
+                                        NSUInteger targetSegmentIdx = 0;
+                                        if (wordIdx >= 0) {
+                                                for (NSUInteger idx = 0; idx < segmentWordIndexRanges.count; idx++) {
+                                                        NSRange wordIdxRange = [segmentWordIndexRanges[idx] rangeValue];
+                                                        if (wordIdx >= (NSInteger)wordIdxRange.location && wordIdx < (NSInteger)NSMaxRange(wordIdxRange)) {
+                                                                targetSegmentIdx = idx;
+                                                                break;
+                                                        }
+                                                }
+                                        }
+
+                                        NSRange targetRange = [segmentRanges[targetSegmentIdx] rangeValue];
+                                        NSRange targetWordRange = [segmentWordIndexRanges[targetSegmentIdx] rangeValue];
+                                        NSString *segmentText = [baseText substringWithRange:targetRange];
+                                        
+                                        if (segmentText.length > 0 && [segmentText hasPrefix:@" "]) {
+                                                targetRange.location += 1;
+                                                targetRange.length -= 1;
+                                                segmentText = [baseText substringWithRange:targetRange];
+                                        }
+
+                                        NSMutableArray<NSValue *> *adjustedWordRanges = [NSMutableArray array];
+                                        for (NSUInteger idx = targetWordRange.location; idx < NSMaxRange(targetWordRange); idx++) {
+                                                NSRange origRange = [wordRanges[idx] rangeValue];
+                                                NSRange adjRange = NSMakeRange(origRange.location - targetRange.location, origRange.length);
+                                                [adjustedWordRanges addObject:[NSValue valueWithRange:adjRange]];
+                                        }
+
+                                        baseText = segmentText;
+                                        wordRanges = [adjustedWordRanges copy];
+                                        if (wordIdx >= 0) {
+                                                wordIdx = wordIdx - (NSInteger)targetWordRange.location;
+                                        }
+                                }
+                        }
+                }
+        }
+
+        if (forceLowercase) baseText = baseText.lowercaseString;
+
+        NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:baseText];
         [attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
         [attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
         [attributed addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, attributed.length)];
 
         if (wordHighlighting && wordRanges.count > 0) {
-                NSInteger wordIdx = self.previewWordIndex;
-                if (self.previewAnimationTimer && self.previewLines.count > 0) {
-                        NSTimeInterval timeInSong = fmod([NSDate timeIntervalSinceReferenceDate] - self.previewStartTime, 42.0);
-                        NSInteger lineIdx = self.previewLineIndex % (NSInteger)self.previewLines.count;
-                        DateLyricsPreviewLine *currentLine = self.previewLines[lineIdx];
-
-                        NSMutableArray<NSNumber *> *visibleWordBegins = [NSMutableArray array];
-                        for (NSUInteger i = 0; i < currentLine.wordRanges.count; i++) {
-                                BOOL isBg = [currentLine.wordIsBackground[i] boolValue];
-                                if (isBg && !showAdlibs) continue;
-                                [visibleWordBegins addObject:currentLine.wordBeginTimes[i]];
-                        }
-
-                        NSInteger resolvedWordIndex = -1;
-                        if (timeInSong >= currentLine.beginTime) {
-                                for (NSInteger i = 0; i < visibleWordBegins.count; i++) {
-                                        double wBegin = [visibleWordBegins[i] doubleValue];
-                                        if (timeInSong >= wBegin) {
-                                                resolvedWordIndex = i;
-                                        }
-                                }
-                        }
-                        wordIdx = resolvedWordIndex;
-                        self.previewWordIndex = resolvedWordIndex;
-                }
-
                 BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 
                 if (highlightStyle == 2) {
@@ -617,8 +775,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 }
         }
 
-        self.mainPreviewLabel.attributedText = attributed;
+        return attributed;
 }
+
+- (void)amlRefreshMainPreview {
+        self.mainPreviewLabel.alpha = 1.0;
+        self.mainPreviewLabel.attributedText = [self amlAttributedTextForLine:self.previewLineIndex word:self.previewWordIndex];
+}
+
 - (void)loadView {
 	[super loadView];
 
