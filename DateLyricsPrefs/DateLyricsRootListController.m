@@ -872,14 +872,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 	NSString *key = [specifier propertyForKey:@"key"];
 	if ([key isEqualToString:@"Enabled"]) {
-		UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-		button.frame = CGRectMake(0, 0, 40, 40);
-		UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-		spinner.center = CGPointMake(20, 20);
-		[spinner startAnimating];
-		[button addSubview:spinner];
-		[button addTarget:self action:@selector(respring) forControlEvents:UIControlEventTouchUpInside];
-		UIBarButtonItem *respringButton = [[UIBarButtonItem alloc] initWithCustomView:button];
+		UIBarButtonItem *respringButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"progress.indicator"] style:UIBarButtonItemStylePlain target:self action:@selector(respring)];
 		self.navigationItem.rightBarButtonItem = respringButton;
 	}
 
