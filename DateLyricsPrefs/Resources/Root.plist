@@ -9,6 +9,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Configuration</string>
+			<key>footerText</key>
+			<string>Relaunch required.</string>
 		</dict>
 
 		<dict>
@@ -37,7 +39,7 @@
 			<key>label</key>
 			<string>Typography</string>
 			<key>footerText</key>
-			<string>Pick a custom font for lyric lines. The system date keeps its normal look when lyrics are hidden.</string>
+			<string>Decapitalize all letters in lyrics.</string>
 		</dict>
 
 		<dict>
@@ -198,7 +200,7 @@
 				<string>text.line.first.and.arrowtriangle.forward</string>
 			</dict>
 			<key>default</key>
-			<false/>
+			<true/>
 			<key>defaults</key>
 			<string>com.shalamand3r.datelyrics</string>
 			<key>PostNotification</key>
@@ -207,185 +209,185 @@
 			<string>WordHighlighting</string>
 		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSGroupCell</string>
-				<key>label</key>
-				<string>Line Transitions</string>
-				<key>footerText</key>
-				<string>Choose how each new lyric line animates in. Word-by-word highlighting still updates live within the line.</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Line Transitions</string>
+			<key>footerText</key>
+			<string>Choose the animation for lyric line changes.</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSwitchCell</string>
-				<key>key</key>
-				<string>TransitionsEnabled</string>
-				<key>label</key>
-				<string>Enabled</string>
-				<key>default</key>
-				<true/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>TransitionsEnabled</string>
+			<key>label</key>
+			<string>Enabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSegmentCell</string>
-				<key>key</key>
-				<string>TransitionStyle</string>
-				<key>label</key>
-				<string>Transition Style</string>
-				<key>default</key>
+		<dict>
+			<key>cell</key>
+			<string>PSSegmentCell</string>
+			<key>key</key>
+			<string>TransitionStyle</string>
+			<key>label</key>
+			<string>Transition Style</string>
+			<key>default</key>
+			<integer>1</integer>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>requires</key>
+			<string>TransitionsEnabled</string>
+			<key>validTitles</key>
+			<array>
+				<string>Fade</string>
+				<string>Up</string>
+				<string>Down</string>
+				<string>Push</string>
+				<string>Pop</string>
+			</array>
+			<key>validValues</key>
+			<array>
 				<integer>0</integer>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-					<key>PostNotification</key>
-					<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-					<key>requires</key>
-					<string>TransitionsEnabled</string>
-					<key>validTitles</key>
-				<array>
-					<string>Fade</string>
-					<string>Up</string>
-					<string>Down</string>
-					<string>Push</string>
-					<string>Pop</string>
-				</array>
-				<key>validValues</key>
-				<array>
-					<integer>0</integer>
-					<integer>1</integer>
-					<integer>2</integer>
-					<integer>3</integer>
-					<integer>4</integer>
-				</array>
-			</dict>
+				<integer>1</integer>
+				<integer>2</integer>
+				<integer>3</integer>
+				<integer>4</integer>
+			</array>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSliderCell</string>
-				<key>key</key>
-				<string>TransitionDuration</string>
-				<key>label</key>
-				<string>Transition Length</string>
-				<key>min</key>
-				<real>0.1</real>
-				<key>max</key>
-				<real>0.8</real>
-				<key>default</key>
-				<real>0.28</real>
-				<key>showValue</key>
-				<true/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-				<key>requires</key>
-				<string>TransitionsEnabled</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>key</key>
+			<string>TransitionDuration</string>
+			<key>label</key>
+			<string>Transition Length</string>
+			<key>min</key>
+			<real>0.1</real>
+			<key>max</key>
+			<real>0.8</real>
+			<key>default</key>
+			<real>0.3</real>
+			<key>showValue</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>requires</key>
+			<string>TransitionsEnabled</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSGroupCell</string>
-				<key>label</key>
-				<string>Line Scaling</string>
-				<key>footerText</key>
-				<string>Adjust text size to ensure long regular lyric lines fit the screen. Syllable-timed lyrics do not scale down and will remain at full size, splitting automatically if Split Long Lines is enabled.</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Line Scaling</string>
+			<key>footerText</key>
+			<string>Adjust the scale of the lyrics to fit the width of the lock screen date view, or split long syllable-timed lines automatically.</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSwitchCell</string>
-				<key>key</key>
-				<string>SplitLongLines</string>
-				<key>label</key>
-				<string>Split Long Lines</string>
-				<key>default</key>
-				<false/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-				<key>id</key>
-				<string>SplitLongLines</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>SplitLongLines</string>
+			<key>label</key>
+			<string>Split Long Lines</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>id</key>
+			<string>SplitLongLines</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSwitchCell</string>
-				<key>key</key>
-				<string>ShowAdlibs</string>
-				<key>label</key>
-				<string>Show Adlibs</string>
-				<key>default</key>
-				<true/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-				<key>id</key>
-				<string>ShowAdlibs</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>ShowAdlibs</string>
+			<key>label</key>
+			<string>Show Adlibs</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>id</key>
+			<string>ShowAdlibs</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSliderCell</string>
-				<key>key</key>
-				<string>MinimumScale</string>
-				<key>label</key>
-				<string>Minimum Scale</string>
-				<key>min</key>
-				<real>0.3</real>
-				<key>max</key>
-				<real>1.0</real>
-				<key>default</key>
-				<real>0.55</real>
-				<key>showValue</key>
-				<true/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>key</key>
+			<string>MinimumScale</string>
+			<key>label</key>
+			<string>Minimum Scale</string>
+			<key>min</key>
+			<real>0.3</real>
+			<key>max</key>
+			<real>1.0</real>
+			<key>default</key>
+			<real>0.55</real>
+			<key>showValue</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSGroupCell</string>
-				<key>label</key>
-				<string>Hide Lyrics Delay (Respring Required)</string>
-				<key>footerText</key>
-				<string>Seconds to wait after music is paused before hiding lyrics.</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Hide Lyrics Delay</string>
+			<key>footerText</key>
+			<string>Delay before hiding lyrics when music is paused.</string>
+		</dict>
 
-			<dict>
-				<key>cell</key>
-				<string>PSSliderCell</string>
-				<key>key</key>
-				<string>PauseTimeout</string>
-				<key>label</key>
-				<string>Delay (Respring Required)</string>
-				<key>min</key>
-				<real>0.0</real>
-				<key>max</key>
-				<real>10.0</real>
-				<key>isSegmented</key>
-				<true/>
-				<key>segmentCount</key>
-				<integer>10</integer>
-				<key>snapsToSegment</key>
-				<true/>
-				<key>default</key>
-				<real>3.0</real>
-				<key>showValue</key>
-				<true/>
-				<key>defaults</key>
-				<string>com.shalamand3r.datelyrics</string>
-				<key>PostNotification</key>
-				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>key</key>
+			<string>PauseTimeout</string>
+			<key>label</key>
+			<string>Delay</string>
+			<key>min</key>
+			<real>0.0</real>
+			<key>max</key>
+			<real>10.0</real>
+			<key>isSegmented</key>
+			<true/>
+			<key>segmentCount</key>
+			<integer>10</integer>
+			<key>snapsToSegment</key>
+			<true/>
+			<key>default</key>
+			<real>2.0</real>
+			<key>showValue</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
 
 		<dict>
 			<key>cell</key>
@@ -393,12 +395,14 @@
 			<key>label</key>
 			<string>Actions</string>
 			<key>footerText</key>
-			<string>Close Apple Music to apply font, style, and lyric changes. Music will relaunch automatically when you open it.</string>
+			<string>Close Apple Music to apply changes.</string>
 		</dict>
 
 		<dict>
 			<key>cell</key>
 			<string>PSButtonCell</string>
+			<key>id</key>
+			<string>amlKillMusic</string>
 			<key>label</key>
 			<string>Close Apple Music</string>
 			<key>action</key>
@@ -409,18 +413,11 @@
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
-			<string>Respring</string>
-			<key>action</key>
-			<string>respring</string>
-		</dict>
-
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
 			<string>Reset Settings</string>
 			<key>action</key>
 			<string>resetSettings</string>
+			<key>isDestructive</key>
+			<true/>
 			<key>confirmation</key>
 			<dict>
 				<key>prompt</key>

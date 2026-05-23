@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <spawn.h>
+#import <sys/wait.h>
 #import "DateLyricsRootListController.h"
 
 extern char **environ;
@@ -220,8 +221,8 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         values[@"ForceLowercase"] = @([prefs boolForKey:@"ForceLowercase"]);
         values[@"WordHighlighting"] = @([prefs objectForKey:@"WordHighlighting"] ? [prefs boolForKey:@"WordHighlighting"] : YES);
-        NSInteger highlightStyle = (NSInteger)[prefs integerForKey:@"HighlightStyle"];
-        BOOL highlightTrail = [prefs boolForKey:@"HighlightTrail"];
+        NSInteger highlightStyle = [prefs objectForKey:@"HighlightStyle"] ? (NSInteger)[prefs integerForKey:@"HighlightStyle"] : 2;
+        BOOL highlightTrail = [prefs objectForKey:@"HighlightTrail"] ? [prefs boolForKey:@"HighlightTrail"] : YES;
         if (highlightStyle == 2) {
                 highlightTrail = YES;
         }
@@ -229,22 +230,28 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         values[@"HighlightStyle"] = @(highlightStyle);
         values[@"UseCustomFont"] = @([prefs boolForKey:@"UseCustomFont"]);
         values[@"TransitionsEnabled"] = @([prefs objectForKey:@"TransitionsEnabled"] ? [prefs boolForKey:@"TransitionsEnabled"] : YES);
-        values[@"TransitionStyle"] = @((NSInteger)[prefs integerForKey:@"TransitionStyle"]);
+        values[@"TransitionStyle"] = @([prefs objectForKey:@"TransitionStyle"] ? (NSInteger)[prefs integerForKey:@"TransitionStyle"] : 1);
         id transDuration = [prefs objectForKey:@"TransitionDuration"];
-        values[@"TransitionDuration"] = transDuration ?: @0.28;
+        values[@"TransitionDuration"] = transDuration ?: @0.3;
         id minScale = [prefs objectForKey:@"MinimumScale"];
         values[@"MinimumScale"] = minScale ?: @0.55;
         NSString *fontName = [prefs objectForKey:@"CustomFontName"];
         if ([fontName isKindOfClass:NSString.class]) values[@"CustomFontName"] = fontName;
         id strokeValue = [prefs objectForKey:@"StrokeWidth"];
         values[@"StrokeWidth"] = strokeValue ?: @3.0;
-        values[@"SplitLongLines"] = @([prefs boolForKey:@"SplitLongLines"]);
-        values[@"ShowAdlibs"] = @([prefs objectForKey:@"ShowAdlibs"] ? [prefs boolForKey:@"ShowAdlibs"] : YES);
+        values[@"SplitLongLines"] = @([prefs objectForKey:@"SplitLongLines"] ? [prefs boolForKey:@"SplitLongLines"] : YES);
+        values[@"ShowAdlibs"] = @([prefs objectForKey:@"ShowAdlibs"] ? [prefs boolForKey:@"ShowAdlibs"] : NO);
         return values;
 }
 @interface LSApplicationProxy : NSObject
 @property (nonatomic, readonly) NSURL *dataContainerURL;
 + (id)applicationProxyForIdentifier:(id)arg1;
+@end
+
+@interface LSApplicationWorkspace : NSObject
++ (id)defaultWorkspace;
+- (BOOL)openApplicationWithBundleID:(NSString *)bundleID options:(NSDictionary *)options error:(NSError **)error;
+- (BOOL)openApplicationWithBundleID:(NSString *)bundleID options:(NSDictionary *)options;
 @end
 
 @interface DateLyricsRootListController ()
@@ -256,6 +263,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 @property (nonatomic, assign) NSInteger previewWordIndex;
 @property (nonatomic, strong) NSArray<DateLyricsPreviewLine *> *previewLines;
 @property (nonatomic, assign) NSTimeInterval previewStartTime;
+@property (nonatomic, assign) BOOL resetInProgress;
 @end
 
 @interface DateLyricsFontListController ()
@@ -591,6 +599,10 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 	}
 
+	if ([[specifier propertyForKey:@"action"] isEqualToString:@"resetSettings"]) {
+		cell.textLabel.textColor = [UIColor systemRedColor];
+	}
+
 	return cell;
 }
 
@@ -909,45 +921,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	self.headerImageView.image = [UIImage imageWithContentsOfFile:path];
 }
 
-- (void)respring {
-	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
-	[haptic impactOccurred];
-
-	NSArray<NSArray<NSString *> *> *commands = @[
-		@[ @"/var/jb/usr/bin/sbreload" ],
-		@[ @"/usr/bin/sbreload" ],
-		@[ @"/usr/bin/killall", @"-9", @"SpringBoard" ],
-		@[ @"/bin/killall", @"-9", @"SpringBoard" ]
-	];
-
-	for (NSArray<NSString *> *command in commands) {
-		const char *path = command.firstObject.UTF8String;
-		if (![[NSFileManager defaultManager] isExecutableFileAtPath:command.firstObject]) continue;
-
-		pid_t pid;
-		size_t argc = command.count;
-		char *argv[argc + 1];
-		for (size_t i = 0; i < argc; i++) {
-			argv[i] = (char *)command[i].UTF8String;
-		}
-		argv[argc] = NULL;
-
-		if (posix_spawn(&pid, path, NULL, NULL, argv, environ) == 0) {
-			return;
-		}
-	}
-}
-
 - (void)amlKillMusic {
 	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
 	[haptic impactOccurred];
-
 	NSArray<NSArray<NSString *> *> *commands = @[
 		@[ @"/var/jb/usr/bin/killall", @"-9", @"Music" ],
 		@[ @"/usr/bin/killall", @"-9", @"Music" ],
 		@[ @"/bin/killall", @"-9", @"Music" ]
 	];
-
 	for (NSArray<NSString *> *command in commands) {
 		if (![[NSFileManager defaultManager] isExecutableFileAtPath:command.firstObject]) continue;
 		pid_t pid;
@@ -958,12 +939,15 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 		argv[argc] = NULL;
 		if (posix_spawn(&pid, command.firstObject.UTF8String, NULL, NULL, argv, environ) == 0) {
-			return;
+			break;
 		}
 	}
 }
 
 - (void)resetSettings {
+	if (self.resetInProgress) return;
+	self.resetInProgress = YES;
+
 	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
 	[haptic impactOccurred];
 
@@ -977,6 +961,11 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"StrokeWidth", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MinimumScale", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"SplitLongLines", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"ShowAdlibs", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesAppSynchronize((__bridge CFStringRef)kDateLyricsPrefsSuite);
 
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1014,6 +1003,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)@"com.shalamand3r.datelyrics/ReloadPrefs", NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsCurrentLineChangedNotification, NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsLegacyCurrentLineChangedNotification, NULL, NULL, YES);
+	self.resetInProgress = NO;
 }
 
 - (void)openGithub {

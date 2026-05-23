@@ -144,18 +144,18 @@ static __weak MPNowPlayingContentItem *gCurrentContentItem = nil;
 static BOOL gDateLyricsEnabled = YES;
 static BOOL gDateLyricsForceLowercase = NO;
 static BOOL gDateLyricsWordHighlighting = YES;
-static BOOL gDateLyricsHighlightTrail = NO;
-static NSInteger gDateLyricsHighlightStyle = 0;
+static BOOL gDateLyricsHighlightTrail = YES;
+static NSInteger gDateLyricsHighlightStyle = 2;
 static BOOL gDateLyricsUseCustomFont = NO;
 static NSString *gDateLyricsCustomFontName = nil;
 static BOOL gDateLyricsTransitionsEnabled = YES;
-static NSInteger gDateLyricsTransitionStyle = 0;
-static NSTimeInterval gDateLyricsTransitionDuration = 0.28;
+static NSInteger gDateLyricsTransitionStyle = 1;
+static NSTimeInterval gDateLyricsTransitionDuration = 0.3;
 static CGFloat gDateLyricsStrokeWidth = 3.0;
-static BOOL gDateLyricsSplitLongLines = NO;
-static BOOL gDateLyricsShowAdlibs = YES;
+static BOOL gDateLyricsSplitLongLines = YES;
+static BOOL gDateLyricsShowAdlibs = NO;
 static CGFloat gDateLyricsMinimumScale = 0.55;
-static NSTimeInterval gDateLyricsPauseTimeout = 3.0;
+static NSTimeInterval gDateLyricsPauseTimeout = 2.0;
 
 static NSHashTable<CSProminentSubtitleDateView *> *gDateLyricsDateViews = nil;
 static NSHashTable<UIView *> *gDateLyricsWidgetSlots = nil;
@@ -2090,27 +2090,27 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
         gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
         gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
-        gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 0);
-        gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", NO);
+        gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 2);
+        gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", YES);
         gDateLyricsUseCustomFont = getPrefBool(@"UseCustomFont", NO);
         gDateLyricsCustomFontName = getPrefString(@"CustomFontName", nil);
         gDateLyricsTransitionsEnabled = getPrefBool(@"TransitionsEnabled", YES);
         
-        NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleFade);
+        NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleSlideUp);
         if (transitionStyle < DateLyricsTransitionStyleFade || transitionStyle > DateLyricsTransitionStylePop) {
-            transitionStyle = DateLyricsTransitionStyleFade;
+            transitionStyle = DateLyricsTransitionStyleSlideUp;
         }
         gDateLyricsTransitionStyle = transitionStyle;
-        gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.28);
+        gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.3);
         gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
-        gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", NO);
+        gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", YES);
         if (gDateLyricsSplitLongLines) {
             gDateLyricsShowAdlibs = NO;
         } else {
-            gDateLyricsShowAdlibs = getPrefBool(@"ShowAdlibs", YES);
+            gDateLyricsShowAdlibs = getPrefBool(@"ShowAdlibs", NO);
         }
         gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
-        gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 3.0);
+        gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 2.0);
 
         if (!gDateLyricsEnabled) {
             if (DateLyricsIsSpringBoardHost()) {
