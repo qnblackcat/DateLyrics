@@ -871,6 +871,18 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	[haptic impactOccurred];
 
 	NSString *key = [specifier propertyForKey:@"key"];
+	if ([key isEqualToString:@"Enabled"]) {
+		UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+		button.frame = CGRectMake(0, 0, 40, 40);
+		UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+		spinner.center = CGPointMake(20, 20);
+		[spinner startAnimating];
+		[button addSubview:spinner];
+		[button addTarget:self action:@selector(respring) forControlEvents:UIControlEventTouchUpInside];
+		UIBarButtonItem *respringButton = [[UIBarButtonItem alloc] initWithCustomView:button];
+		self.navigationItem.rightBarButtonItem = respringButton;
+	}
+
 	if ([key isEqualToString:@"SplitLongLines"]) {
 		if ([value boolValue]) {
 			NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
@@ -928,6 +940,30 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		@[ @"/var/jb/usr/bin/killall", @"-9", @"Music" ],
 		@[ @"/usr/bin/killall", @"-9", @"Music" ],
 		@[ @"/bin/killall", @"-9", @"Music" ]
+	];
+	for (NSArray<NSString *> *command in commands) {
+		if (![[NSFileManager defaultManager] isExecutableFileAtPath:command.firstObject]) continue;
+		pid_t pid;
+		size_t argc = command.count;
+		char *argv[argc + 1];
+		for (size_t i = 0; i < argc; i++) {
+			argv[i] = (char *)command[i].UTF8String;
+		}
+		argv[argc] = NULL;
+		if (posix_spawn(&pid, command.firstObject.UTF8String, NULL, NULL, argv, environ) == 0) {
+			break;
+		}
+	}
+}
+
+- (void)respring {
+	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
+	[haptic impactOccurred];
+	NSArray<NSArray<NSString *> *> *commands = @[
+		@[ @"/var/jb/usr/bin/sbreload" ],
+		@[ @"/usr/bin/sbreload" ],
+		@[ @"/usr/bin/killall", @"-9", @"SpringBoard" ],
+		@[ @"/bin/killall", @"-9", @"SpringBoard" ]
 	];
 	for (NSArray<NSString *> *command in commands) {
 		if (![[NSFileManager defaultManager] isExecutableFileAtPath:command.firstObject]) continue;
