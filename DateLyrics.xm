@@ -50,6 +50,9 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @property (nonatomic, copy) NSString *amlCurrentPayloadSignature;
 @property (assign, nonatomic) float playbackRate;
 @property (nonatomic, strong) NSNumber *amlPlaybackRate;
+@property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
+@property (nonatomic, strong) NSNumber *amlLastSystemTime;
+@property (assign, nonatomic) NSInteger amlLastStoreID;
 - (NSTimeInterval)calculatedElapsedTime;
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
 @end
@@ -136,6 +139,7 @@ static NSMutableDictionary<NSNumber *, NSArray<MSVLyricsLine *> *> *gLyricsCache
 static NSMutableDictionary<NSNumber *, NSArray<DateLyricsTimedLine *> *> *gWordLyricsCache = nil;
 static pthread_mutex_t gLyricsCacheMutex = PTHREAD_MUTEX_INITIALIZER;
 static MPNowPlayingInfoCenter *gNowPlayingInfoCenter = nil;
+static __weak MPNowPlayingContentItem *gCurrentContentItem = nil;
 
 static BOOL gDateLyricsEnabled = YES;
 static BOOL gDateLyricsForceLowercase = NO;
@@ -908,6 +912,30 @@ static void ParseLyricsData(NSData *data, NSInteger iTunesStoreID, NSInteger lyr
     pthread_mutex_unlock(&gLyricsCacheMutex);
     
     gLastLyricsAdamID = lyricsAdamID;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (gCurrentContentItem) {
+            NSInteger currentStoreID = 0;
+            if ([gCurrentContentItem respondsToSelector:@selector(storeID)]) {
+                currentStoreID = gCurrentContentItem.storeID;
+            } else if ([gCurrentContentItem respondsToSelector:@selector(metadata)]) {
+                id metadata = [gCurrentContentItem performSelector:@selector(metadata)];
+                if ([metadata respondsToSelector:@selector(iTunesStoreIdentifier)]) {
+                    currentStoreID = (NSInteger)[metadata performSelector:@selector(iTunesStoreIdentifier)];
+                }
+            }
+            if (currentStoreID == iTunesStoreID) {
+                double et = [gCurrentContentItem calculatedElapsedTime];
+                float rate = 1.0f;
+                if (gCurrentContentItem.amlPlaybackRate != nil) {
+                    rate = [gCurrentContentItem.amlPlaybackRate floatValue];
+                } else if ([gCurrentContentItem respondsToSelector:@selector(playbackRate)]) {
+                    rate = gCurrentContentItem.playbackRate;
+                }
+                [gCurrentContentItem setElapsedTime:et playbackRate:rate];
+            }
+        }
+    });
 }
 
 static void ProcessNextTask(void) {
@@ -1094,12 +1122,18 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 %property (nonatomic, copy) NSString *amlCurrentLyricTitle;
 %property (nonatomic, copy) NSString *amlCurrentPayloadSignature;
 %property (nonatomic, strong) NSNumber *amlPlaybackRate;
+%property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
+%property (nonatomic, strong) NSNumber *amlLastSystemTime;
+%property (assign, nonatomic) NSInteger amlLastStoreID;
 
 - (void)dealloc {
     [self.amlTimer invalidate];
     self.amlTimer = nil;
     [self.amlPauseTimer invalidate];
     self.amlPauseTimer = nil;
+    if (gCurrentContentItem == self) {
+        gCurrentContentItem = nil;
+    }
     %orig;
 }
 
@@ -1112,14 +1146,22 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
 %new
 - (NSTimeInterval)calculatedElapsedTime {
-    NSTimeInterval et = 0;
-    if ([self respondsToSelector:@selector(elapsedTime)]) {
-        et = [(id)self elapsedTime];
-    } else if ([self respondsToSelector:@selector(metadata)]) {
-        id metadata = [self performSelector:@selector(metadata)];
-        if ([metadata respondsToSelector:@selector(elapsedTime)]) {
-            et = (NSTimeInterval)[(NSNumber *)[metadata performSelector:@selector(elapsedTime)] doubleValue];
+    if (self.amlLastSystemElapsedTime == nil) {
+        NSTimeInterval et = 0;
+        if ([self respondsToSelector:@selector(elapsedTime)]) {
+            et = [(id)self elapsedTime];
+        } else if ([self respondsToSelector:@selector(metadata)]) {
+            id metadata = [self performSelector:@selector(metadata)];
+            if ([metadata respondsToSelector:@selector(elapsedTime)]) {
+                et = (NSTimeInterval)[(NSNumber *)[metadata performSelector:@selector(elapsedTime)] doubleValue];
+            }
         }
+        return et;
+    }
+    NSTimeInterval et = [self.amlLastSystemElapsedTime doubleValue];
+    if (self.amlPlaybackRate != nil && [self.amlPlaybackRate floatValue] > 0.0f) {
+        NSTimeInterval timePassed = [NSDate timeIntervalSinceReferenceDate] - [self.amlLastSystemTime doubleValue];
+        et += timePassed * [self.amlPlaybackRate floatValue];
     }
     return et;
 }
@@ -1177,7 +1219,10 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)playbackRate {
     self.amlPlaybackRate = @(playbackRate);
+    self.amlLastSystemElapsedTime = @(elapsedTime);
+    self.amlLastSystemTime = @([NSDate timeIntervalSinceReferenceDate]);
     %orig;
+    gCurrentContentItem = self;
     [self.amlTimer invalidate];
     self.amlTimer = nil;
     [self.amlPauseTimer invalidate];
@@ -1191,6 +1236,12 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         if ([metadata respondsToSelector:@selector(iTunesStoreIdentifier)]) {
             storeID = (NSInteger)[metadata performSelector:@selector(iTunesStoreIdentifier)];
         }
+    }
+
+    if (storeID != self.amlLastStoreID) {
+        self.amlLastStoreID = storeID;
+        self.amlCurrentLyricTitle = nil;
+        self.amlCurrentPayloadSignature = nil;
     }
 
     if (!storeID) {

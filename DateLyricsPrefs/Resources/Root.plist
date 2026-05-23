@@ -386,6 +386,7 @@
 				<key>PostNotification</key>
 				<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
 			</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
