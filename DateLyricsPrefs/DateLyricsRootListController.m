@@ -872,7 +872,9 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 	NSString *key = [specifier propertyForKey:@"key"];
 	if ([key isEqualToString:@"Enabled"]) {
-		UIBarButtonItem *respringButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"progress.indicator"] style:UIBarButtonItemStylePlain target:self action:@selector(respring)];
+		UIImage *respringImage = [UIImage systemImageNamed:@"arrow.clockwise"];
+		UIBarButtonItem *respringButton = [[UIBarButtonItem alloc] initWithImage:respringImage style:UIBarButtonItemStylePlain target:self action:@selector(respring)];
+		respringButton.tintColor = [UIColor systemBlueColor];
 		self.navigationItem.rightBarButtonItem = respringButton;
 	}
 
