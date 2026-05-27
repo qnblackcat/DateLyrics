@@ -530,6 +530,14 @@ static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origL
     filteredLine.words = [filteredWords copy];
     filteredLine.text = [newText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
+    if (filteredWords.count > 0) {
+        filteredLine.begin = filteredWords.firstObject.begin;
+        filteredLine.end = filteredWords.lastObject.end;
+    } else {
+        filteredLine.begin = origLine.begin;
+        filteredLine.end = origLine.end;
+    }
+
     if (filteredLine.text.length == 0 || filteredLine.words.count == 0) {
         return nil;
     }
