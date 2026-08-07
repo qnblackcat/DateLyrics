@@ -1726,16 +1726,9 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
     // Phase 1: screen-off gating.
     // When PauseWhenScreenOff is enabled and the screen is off, skip the
-    // resolution and publish pipeline entirely — unless haptics are enabled,
-    // in which case we still resolve so we can fire haptic feedback, but we
-    // short-circuit the publish (file write + Darwin notification) at the end.
-    BOOL screenOffHapticsOnly = NO;
+    // resolution and publish pipeline entirely.
     if (gDateLyricsPauseWhenScreenOff && !gDateLyricsConsumerActive) {
-        if (gDateLyricsHapticsEnabled) {
-            screenOffHapticsOnly = YES; // resolve but don't publish visuals
-        } else {
-            return; // nothing to do at all
-        }
+        return;
     }
 
     NSString *title = nil;
@@ -2020,13 +2013,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         self.amlCurrentLyricTitle = title;
         self.amlCurrentPayloadSignature = payloadSignature;
         self.amlLastPayloadPublishTime = @(now);
-        // If screen is off and haptics-only mode is active, skip the visual
-        // publish (file write + Darwin notification) — haptics already fired
-        // above in DateLyricsCurrentLineChanged on the SpringBoard side, but
-        // that path is gated too. Here in Music we just avoid the IPC cost.
-        if (!screenOffHapticsOnly) {
-            DateLyricsPublishPayload(payload);
-        }
+        DateLyricsPublishPayload(payload);
     }
 }
 
