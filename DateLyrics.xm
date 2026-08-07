@@ -1726,12 +1726,8 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
     // Phase 1: screen-off gating.
     // When PauseWhenScreenOff is enabled and the screen is off, skip the
-    // resolution and publish pipeline entirely. Keep a low-frequency heartbeat
-    // timer alive so the loop resumes when the screen turns back on.
+    // resolution and publish pipeline entirely.
     if (gDateLyricsPauseWhenScreenOff && !gDateLyricsConsumerActive) {
-        if (playbackRate > 0.0f) {
-            self.amlTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(amlTimerFired:) userInfo:nil repeats:NO];
-        }
         return;
     }
 
@@ -2869,6 +2865,13 @@ static void DateLyricsHandleConsumerPaused(CFNotificationCenterRef center, void 
 
 static void DateLyricsHandleConsumerResumed(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     gDateLyricsConsumerActive = YES;
+    // We stopped the timer when the screen turned off. Now that we're back,
+    // manually kick the loop back into gear on the active content item.
+    if (gCurrentContentItem) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [gCurrentContentItem performSelector:@selector(amlTimerFired:) withObject:nil];
+        });
+    }
 }
 
 %ctor {
