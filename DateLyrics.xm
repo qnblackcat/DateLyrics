@@ -119,6 +119,10 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @property (nonatomic, assign) NSTimeInterval end;
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, strong) NSArray<DateLyricsTimedWord *> *words;
+// Memoised adlib-filtered form of this line. See DateLyricsGetFilteredLine.
+@property (nonatomic, strong) DateLyricsTimedLine *amlCachedFiltered;
+@property (nonatomic, assign) BOOL amlCachedFilteredValid;
+@property (nonatomic, assign) BOOL amlCachedFilteredAdlibs;
 @end
 
 @implementation LyricsTask
@@ -559,7 +563,7 @@ static CGFloat DateLyricsMeasuredLineWidth(NSString *text, UIFont *font) {
     return ceil(CGRectGetWidth(rect));
 }
 
-static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origLine) {
+static DateLyricsTimedLine *DateLyricsComputeFilteredLine(DateLyricsTimedLine *origLine) {
     if (!origLine) return nil;
     if (gDateLyricsShowAdlibs) return origLine;
 
@@ -657,6 +661,25 @@ static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origL
         return nil;
     }
     return filteredLine;
+}
+
+// Filtering a line is pure — same input, same ShowAdlibs setting, same result — but it
+// was being recomputed for every line in the song on every playback tick, allocating a
+// replacement line, N replacement words and a rebuilt string each time, purely to work
+// out which line is currently playing. At ~4 ticks/sec across a full lyric sheet that
+// was the single largest CPU cost in the Music process. Memoised per line; the flag
+// invalidates if ShowAdlibs is toggled at runtime.
+static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *origLine) {
+    if (!origLine) return nil;
+    if (origLine.amlCachedFilteredValid && origLine.amlCachedFilteredAdlibs == gDateLyricsShowAdlibs) {
+        return origLine.amlCachedFiltered;
+    }
+
+    DateLyricsTimedLine *filtered = DateLyricsComputeFilteredLine(origLine);
+    origLine.amlCachedFiltered = filtered;
+    origLine.amlCachedFilteredAdlibs = gDateLyricsShowAdlibs;
+    origLine.amlCachedFilteredValid = YES;
+    return filtered;
 }
 
 static NSString *DateLyricsStripParentheses(NSString *text) {
