@@ -219,6 +219,8 @@ static const void *kDateLyricsPendingApplyKey = &kDateLyricsPendingApplyKey;
 static const void *kDateLyricsSplitPlanKey = &kDateLyricsSplitPlanKey;
 // Latched (grow-only) wrap width for the label. See DateLyricsSplitAvailableWidth.
 static const void *kDateLyricsSplitWidthKey = &kDateLyricsSplitWidthKey;
+// Frame the label is pinned to for the duration of a line transition.
+static const void *kDateLyricsFrozenFrameKey = &kDateLyricsFrozenFrameKey;
 
 static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
 static NSString *const kDateLyricsCurrentLineKey = @"CurrentLyricLine";
@@ -745,7 +747,22 @@ static NSArray<NSValue *> *DateLyricsComputeSegments(NSString *text, UIFont *fon
     [segmentRanges addObject:[NSValue valueWithRange:NSMakeRange(segmentStart, text.length - segmentStart)]];
     if (segmentRanges.count < 2) return nil;
 
-    return segmentRanges;
+    // Segments break at the *start* of the next word, so every one but the last
+    // carries a trailing space ("break down the door like a "), which throws the
+    // centring off by a space width. Only the length shrinks, never the location,
+    // so highlight offsets — measured from range.location — are unaffected.
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSMutableArray<NSValue *> *trimmed = [NSMutableArray arrayWithCapacity:segmentRanges.count];
+    for (NSValue *value in segmentRanges) {
+        NSRange range = value.rangeValue;
+        while (range.length > 0 && [whitespace characterIsMember:[text characterAtIndex:NSMaxRange(range) - 1]]) {
+            range.length -= 1;
+        }
+        if (range.length > 0) [trimmed addObject:[NSValue valueWithRange:range]];
+    }
+    if (trimmed.count < 2) return nil;
+
+    return trimmed;
 }
 
 static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILabel *label, UIFont *baseFont) {
@@ -860,6 +877,31 @@ static NSUInteger DateLyricsBeginLabelTransition(_UIAnimatingLabel *label) {
     objc_setAssociatedObject(label, kDateLyricsTransitionGenerationKey, @(generation), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(label, kDateLyricsAnimatingTransitionKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(label, kDateLyricsPendingApplyKey, nil, OBJC_ASSOCIATION_ASSIGN);
+
+    // Pin the geometry for the duration of the animation.
+    //
+    // A UILabel is sized to its text. CATransition works by cross-fading the
+    // layer's old backing store against the new one — if the layer's bounds change
+    // while that is in flight, the two renderings are laid out at different sizes
+    // and both stay visible. That is the tearing seen when a full line is followed
+    // by a much shorter split segment, and vice versa.
+    //
+    // The frozen frame is widened to the stable (latched) width so neither the
+    // outgoing nor the incoming line is clipped, and re-centred so centred text
+    // does not appear to jump sideways. layoutSubviews re-asserts this every pass
+    // until the transition completes, so nothing UIKit does in between can resize
+    // the layer mid-animation.
+    CGRect frozen = label.frame;
+    CGFloat stableWidth = DateLyricsSplitAvailableWidth(label);
+    if (stableWidth > frozen.size.width) {
+        frozen.origin.x -= (stableWidth - frozen.size.width) / 2.0;
+        frozen.size.width = stableWidth;
+    }
+    if (!CGRectIsEmpty(frozen)) {
+        objc_setAssociatedObject(label, kDateLyricsFrozenFrameKey, [NSValue valueWithCGRect:frozen], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        label.frame = frozen;
+    }
+
     [label.layer removeAllAnimations];
     label.alpha = 1.0;
     label.transform = CGAffineTransformIdentity;
@@ -879,6 +921,9 @@ static void DateLyricsFinishLabelTransitionAfterDelay(_UIAnimatingLabel *label, 
         strongLabel.transform = CGAffineTransformIdentity;
         objc_setAssociatedObject(strongLabel, kDateLyricsAnimatingTransitionKey, nil, OBJC_ASSOCIATION_ASSIGN);
         objc_setAssociatedObject(strongLabel, kDateLyricsPendingApplyKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        // Release the pinned geometry; normal layout resumes on the next pass.
+        objc_setAssociatedObject(strongLabel, kDateLyricsFrozenFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        [strongLabel setNeedsLayout];
         [strongLabel _amlApplyCurrentLyric];
     });
 }
@@ -1988,6 +2033,7 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     objc_setAssociatedObject(label, kDateLyricsAnimatingTransitionKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsPendingApplyKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsSplitPlanKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(label, kDateLyricsFrozenFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
     // Bumping the generation invalidates any in-flight completion block, so it
     // cannot resurrect a lyric on top of the stock date after we restore.
     NSUInteger generation = [objc_getAssociatedObject(label, kDateLyricsTransitionGenerationKey) unsignedIntegerValue] + 1;
@@ -2128,17 +2174,23 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     NSDictionary *payload = DateLyricsCurrentRenderablePayload();
     NSString *lyric = payload[@"text"];
     if (lyric.length > 0 && gDateLyricsEnabled) {
-        // Never resize or repaint the label while a line transition is running:
-        // changing geometry mid-animation is exactly what produced the doubled
-        // line artifact. The completion block re-applies once we settle.
-        if ([objc_getAssociatedObject(label, kDateLyricsAnimatingTransitionKey) boolValue]) {
+        // While a transition runs, hold the label at the frame captured when it
+        // started. UIKit will otherwise re-size the label to its new (shorter or
+        // longer) text mid-animation, which is what tears the outgoing and
+        // incoming lines into each other.
+        NSValue *frozen = objc_getAssociatedObject(label, kDateLyricsFrozenFrameKey);
+        if (frozen) {
+            CGRect frozenFrame = frozen.CGRectValue;
+            if (!CGRectEqualToRect(label.frame, frozenFrame)) {
+                label.frame = frozenFrame;
+            }
             objc_setAssociatedObject(label, kDateLyricsPendingApplyKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             return;
         }
-        CGRect bounds = self.bounds;
+
         CGRect frame = label.frame;
         frame.origin.x = 0.0;
-        frame.size.width = bounds.size.width;
+        frame.size.width = self.bounds.size.width;
         if (!CGRectEqualToRect(frame, label.frame)) {
             label.frame = frame;
         }
