@@ -213,6 +213,105 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>Haptics</string>
+			<key>footerText</key>
+			<string>Provide haptic feedback on lyric changes.</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>HapticsEnabled</string>
+			<key>label</key>
+			<string>Enabled</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>hand.tap</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSegmentCell</string>
+			<key>key</key>
+			<string>HapticStyleSyllable</string>
+			<key>label</key>
+			<string>Syllable Change</string>
+			<key>default</key>
+			<integer>1</integer>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>requires</key>
+			<string>HapticsEnabled</string>
+			<key>validTitles</key>
+			<array>
+				<string>None</string>
+				<string>Light</string>
+				<string>Medium</string>
+				<string>Heavy</string>
+				<string>Soft</string>
+				<string>Rigid</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>-1</integer>
+				<integer>0</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+				<integer>3</integer>
+				<integer>4</integer>
+			</array>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSegmentCell</string>
+			<key>key</key>
+			<string>HapticStyleLine</string>
+			<key>label</key>
+			<string>Line Change</string>
+			<key>default</key>
+			<integer>2</integer>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>requires</key>
+			<string>HapticsEnabled</string>
+			<key>validTitles</key>
+			<array>
+				<string>None</string>
+				<string>Light</string>
+				<string>Medium</string>
+				<string>Heavy</string>
+				<string>Soft</string>
+				<string>Rigid</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>-1</integer>
+				<integer>0</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+				<integer>3</integer>
+				<integer>4</integer>
+			</array>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>Line Transitions</string>
 			<key>footerText</key>
 			<string>Choose the animation for lyric line changes.</string>
@@ -345,6 +444,42 @@
 			<real>1.0</real>
 			<key>default</key>
 			<real>0.55</real>
+			<key>showValue</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Instrumental Gaps</string>
+			<key>footerText</key>
+			<string>How long to keep the last lyric visible after its timing ends.</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSliderCell</string>
+			<key>key</key>
+			<string>LineHoldDuration</string>
+			<key>label</key>
+			<string>Hold Duration</string>
+			<key>min</key>
+			<real>0.0</real>
+			<key>max</key>
+			<real>10.0</real>
+			<key>isSegmented</key>
+			<true/>
+			<key>segmentCount</key>
+			<integer>10</integer>
+			<key>snapsToSegment</key>
+			<true/>
+			<key>default</key>
+			<real>2.0</real>
 			<key>showValue</key>
 			<true/>
 			<key>defaults</key>

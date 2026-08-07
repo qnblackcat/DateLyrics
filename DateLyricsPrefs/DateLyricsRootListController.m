@@ -987,11 +987,15 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"WordHighlighting", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightTrail", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticStyleSyllable", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticStyleLine", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"UseCustomFont", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"CustomFontName", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"StrokeWidth", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MinimumScale", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"LineHoldDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
@@ -1001,12 +1005,9 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
-    NSString *libraryPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *lyricsRoot = [libraryPath stringByAppendingPathComponent:@"DateLyrics"];
-    if ([fileManager fileExistsAtPath:lyricsRoot]) {
-        [fileManager removeItemAtPath:lyricsRoot error:nil];
-    }
-
+    // Best-effort direct cleanup. Preferences.app is sandboxed, so these will often
+    // fail silently — the ClearCaches notification below is what actually works,
+    // because each host clears its own container from inside its own process.
     Class proxyClass = NSClassFromString(@"LSApplicationProxy");
     if (proxyClass) {
         LSApplicationProxy *proxy = [proxyClass applicationProxyForIdentifier:@"com.apple.Music"];
@@ -1031,6 +1032,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
     [self reload];
 
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)@"com.shalamand3r.datelyrics/ClearCaches", NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)@"com.shalamand3r.datelyrics/ReloadPrefs", NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsCurrentLineChangedNotification, NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsLegacyCurrentLineChangedNotification, NULL, NULL, YES);
@@ -1046,46 +1048,46 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 - (void)fetchGithubLogo {
 	if (_cachedGithubIcon) return;
 	NSURL *url = [NSURL URLWithString:@"https://github.com/shalamand3r/shalamand3r.github.io/blob/main/CydiaIcon.png?raw=true"];
+	__weak typeof(self) weakSelf = self;
 	[[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-		if (data && !error) {
+		if (!data || error) return;
+
+		// Everything below touches UIKit (UIScreen, UIGraphics, CALayer rendering)
+		// and mutates the shared _cachedGithubIcon static. All of it must run on the
+		// main thread; this block is on a URLSession worker.
+		dispatch_async(dispatch_get_main_queue(), ^{
+			typeof(self) strongSelf = weakSelf;
+			if (!strongSelf || _cachedGithubIcon) return;
+
 			UIImage *image = [UIImage imageWithData:data];
-			if (image) {
-				UIImageView *imageView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 29, 29)];
-				imageView.image = image;
-				imageView.layer.cornerRadius = 7;
-				imageView.layer.masksToBounds = YES;
-				imageView.layer.contentsGravity = kCAGravityResizeAspectFill;
+			if (!image) return;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-				CGFloat scale = [UIScreen mainScreen].scale;
-#pragma clang diagnostic pop
-				UIGraphicsBeginImageContextWithOptions(imageView.bounds.size, NO, scale);
-				[imageView.layer renderInContext:UIGraphicsGetCurrentContext()];
-				UIImage *squircleImage = UIGraphicsGetImageFromCurrentImageContext();
-				UIGraphicsEndImageContext();
+			CGRect bounds = CGRectMake(0, 0, 29, 29);
+			UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:bounds];
+			UIImage *squircleImage = [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
+				UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:bounds cornerRadius:7.0];
+				[clip addClip];
+				[image drawInRect:bounds];
+			}];
+			if (!squircleImage) return;
 
-				_cachedGithubIcon = squircleImage;
-				dispatch_async(dispatch_get_main_queue(), ^{
-					PSSpecifier *githubSpecifier = [self specifierForID:@"GitHubCell"];
-					if (githubSpecifier) {
-						[githubSpecifier setProperty:squircleImage forKey:@"iconImage"];
-						[self reloadSpecifier:githubSpecifier];
+			_cachedGithubIcon = squircleImage;
 
-						NSIndexPath *indexPath = [self indexPathForSpecifier:githubSpecifier];
-						if (indexPath) {
-							UITableViewCell *cell = [self.table cellForRowAtIndexPath:indexPath];
-							if (cell) {
-								UIView *spinner = [cell.imageView viewWithTag:1234];
-								if (spinner) {
-									[spinner removeFromSuperview];
-								}
-							}
-						}
-					}
-				});
+			PSSpecifier *githubSpecifier = [strongSelf specifierForID:@"GitHubCell"];
+			if (!githubSpecifier) return;
+
+			[githubSpecifier setProperty:squircleImage forKey:@"iconImage"];
+			[strongSelf reloadSpecifier:githubSpecifier];
+
+			NSIndexPath *indexPath = [strongSelf indexPathForSpecifier:githubSpecifier];
+			if (indexPath) {
+				UITableViewCell *cell = [strongSelf.table cellForRowAtIndexPath:indexPath];
+				UIView *spinner = [cell.imageView viewWithTag:1234];
+				if (spinner) {
+					[spinner removeFromSuperview];
+				}
 			}
-		}
+		});
 	}] resume];
 }
 
