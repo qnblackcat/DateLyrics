@@ -181,6 +181,43 @@ static CGFloat gDateLyricsMinimumScale = 0.55;
 static NSTimeInterval gDateLyricsPauseTimeout = 2.0;
 static NSTimeInterval gDateLyricsLineHoldDuration = 2.0;
 
+static BOOL gDateLyricsDebugLogging = NO;
+static NSString *GetLyricsRootPath(void);
+
+// Diagnostic ring buffer, written to Library/DateLyrics/transition-debug.log inside
+// SpringBoard's container. Temporary — remove once the split-boundary glitch is
+// understood. Off unless the DebugLogging preference is set.
+static void DateLyricsDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void DateLyricsDebugLog(NSString *format, ...) {
+    if (!gDateLyricsDebugLogging) return;
+
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+
+    static NSMutableArray<NSString *> *buffer = nil;
+    static dispatch_queue_t queue = nil;
+    static NSUInteger sinceFlush = 0;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        buffer = [NSMutableArray array];
+        queue = dispatch_queue_create("com.shalamand3r.datelyrics.debuglog", DISPATCH_QUEUE_SERIAL);
+    });
+
+    NSString *stamped = [NSString stringWithFormat:@"%.3f %@", [NSDate timeIntervalSinceReferenceDate], message];
+    dispatch_async(queue, ^{
+        [buffer addObject:stamped];
+        if (buffer.count > 500) {
+            [buffer removeObjectsInRange:NSMakeRange(0, buffer.count - 500)];
+        }
+        if (++sinceFlush < 20) return;
+        sinceFlush = 0;
+        NSString *path = [GetLyricsRootPath() stringByAppendingPathComponent:@"transition-debug.log"];
+        [[buffer componentsJoinedByString:@"\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    });
+}
+
 static NSHashTable<CSProminentSubtitleDateView *> *gDateLyricsDateViews = nil;
 static NSHashTable<UIView *> *gDateLyricsWidgetSlots = nil;
 static NSDictionary *gDateLyricsCurrentPayload = nil;
@@ -801,6 +838,8 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
         plan.segments = DateLyricsComputeSegments(text, measureFont, maxWidth);
         plan.lastIndex = 0;
         objc_setAssociatedObject(label, kDateLyricsSplitPlanKey, plan, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        DateLyricsDebugLog(@"PLAN w=%.1f segs=%lu font=%@ text='%@'",
+                           maxWidth, (unsigned long)plan.segments.count, fontKey, text);
     }
 
     // segments == nil is a cached "this line does not need splitting", so we do not
@@ -969,11 +1008,26 @@ static void DateLyricsAnimateLabelTransition(_UIAnimatingLabel *label, NSString 
                 transition.subtype = kCATransitionFromBottom;
             }
             [label.layer addAnimation:transition forKey:@"DateLyricsLineTransition"];
-            DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
+            // _UIAnimatingLabel animates its own content changes — that is what the
+            // class is for, and it is why Apple uses it for the lock screen date.
+            // Left alone, its built-in animation runs at the same time as the
+            // CATransition we just installed, so the layer carries two overlapping
+            // animations and briefly renders both the old and new line. Suppressing
+            // implicit animations here leaves only our explicit transition, which
+            // addAnimation: installs and is therefore unaffected.
+            [UIView performWithoutAnimation:^{
+                DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
+                [label layoutIfNeeded];
+            }];
             break;
         }
         case DateLyricsTransitionStylePop: {
-            DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
+            // Same reasoning as the slide styles: the content swap itself must not
+            // animate, only the scale/alpha below.
+            [UIView performWithoutAnimation:^{
+                DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
+                [label layoutIfNeeded];
+            }];
             label.transform = CGAffineTransformMakeScale(0.9, 0.9);
             label.alpha = 0.0;
             [UIView animateWithDuration:duration delay:0.0 usingSpringWithDamping:0.78 initialSpringVelocity:0.4 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
@@ -2498,6 +2552,15 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     // single pending flag; the transition's completion re-runs us once we settle.
     // Bookkeeping is deliberately *not* committed here, so previousDisplayText keeps
     // describing what is actually on screen.
+    DateLyricsDebugLog(@"APPLY split=%d w=%.1f frame=%.1f contentChg=%d lineChg=%d trans=%d loc=%@ len=%@ id=%@ prevId=%@ text='%@' prev='%@'",
+                       [renderPayload[@"splitApplied"] boolValue],
+                       CGRectGetWidth(self.bounds),
+                       CGRectGetWidth(self.frame),
+                       contentChanged, lineChanged, isTransitioning,
+                       renderPayload[@"loc"] ?: @"-", renderPayload[@"len"] ?: @"-",
+                       currentLineId ?: @"-", previousLineId ?: @"-",
+                       displayText, previousDisplayText ?: @"-");
+
     if (contentChanged && isTransitioning && !lineChanged) {
         objc_setAssociatedObject(self, kDateLyricsPendingApplyKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return;
@@ -2580,6 +2643,7 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
             return defaultVal;
         };
 
+        gDateLyricsDebugLogging = getPrefBool(@"DebugLogging", YES);
         gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
         gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
         gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
