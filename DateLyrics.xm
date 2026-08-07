@@ -54,6 +54,7 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
 @property (nonatomic, strong) NSNumber *amlLastSystemTime;
 @property (nonatomic, strong) NSNumber *amlLastPayloadPublishTime;
+@property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
 @property (assign, nonatomic) NSInteger amlLastStoreID;
 - (NSTimeInterval)calculatedElapsedTime;
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
@@ -1527,6 +1528,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 %property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
 %property (nonatomic, strong) NSNumber *amlLastSystemTime;
 %property (nonatomic, strong) NSNumber *amlLastPayloadPublishTime;
+%property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
 %property (assign, nonatomic) NSInteger amlLastStoreID;
 
 - (void)dealloc {
@@ -1653,7 +1655,32 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         self.amlCurrentLyricTitle = nil;
         self.amlCurrentPayloadSignature = nil;
         self.amlLastPayloadPublishTime = nil;
+        self.amlLastResolvedElapsed = nil;
     }
+
+    // Keep the position we resolve lyrics against monotonic.
+    //
+    // Two clocks feed this method: MediaRemote's authoritative updates, and our own
+    // amlTimerFired: which extrapolates (last known position + wall clock * rate).
+    // The extrapolation regularly overshoots a line boundary by a few tens of
+    // milliseconds, and the next real update then arrives slightly *earlier* — still
+    // inside the previous line. The lyric therefore advanced, snapped back to the
+    // previous line, and advanced again, all within ~100ms. That is the transition
+    // glitch: three line changes instead of one.
+    //
+    // Small backwards steps are that jitter and are ignored. A large one is a real
+    // seek and is honoured. Only the resolution clock is clamped — %orig and
+    // amlLastSystemElapsedTime above keep Apple's true value, so extrapolation
+    // continues to track the real timeline.
+    static const NSTimeInterval kDateLyricsSeekThreshold = 1.0;
+    if (self.amlLastResolvedElapsed != nil) {
+        NSTimeInterval lastResolved = self.amlLastResolvedElapsed.doubleValue;
+        NSTimeInterval backwards = lastResolved - elapsedTime;
+        if (backwards > 0.0 && backwards < kDateLyricsSeekThreshold) {
+            elapsedTime = lastResolved;
+        }
+    }
+    self.amlLastResolvedElapsed = @(elapsedTime);
 
     if (!storeID) {
         if (self.amlCurrentLyricTitle || self.amlCurrentPayloadSignature || !self.amlLastPayloadPublishTime) {
