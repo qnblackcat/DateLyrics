@@ -824,6 +824,11 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
     NSMutableDictionary *splitPayload = [payload mutableCopy];
     splitPayload[@"text"] = segmentText;
     splitPayload[@"splitApplied"] = @YES;
+    // Each segment is presented as its own line, so give it its own identity.
+    // Line-change detection otherwise falls back to comparing the rendered text,
+    // which treats two consecutive segments with identical wording (a repeated
+    // "na na na") as unchanged and skips the transition between them.
+    splitPayload[@"lineId"] = [NSString stringWithFormat:@"%@#%lu", lineId ?: @"", (unsigned long)targetIndex];
 
     if (highlightRange.location != NSNotFound) {
         NSRange intersection = NSIntersectionRange(targetRange, highlightRange);
