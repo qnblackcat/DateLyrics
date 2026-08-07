@@ -55,6 +55,7 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @property (nonatomic, strong) NSNumber *amlLastSystemTime;
 @property (nonatomic, strong) NSNumber *amlLastPayloadPublishTime;
 @property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
+@property (nonatomic, strong) NSNumber *amlLastResolvedLineIndex;
 @property (assign, nonatomic) NSInteger amlLastStoreID;
 - (NSTimeInterval)calculatedElapsedTime;
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
@@ -185,6 +186,12 @@ static BOOL gDateLyricsShowAdlibs = NO;
 static CGFloat gDateLyricsMinimumScale = 0.55;
 static NSTimeInterval gDateLyricsPauseTimeout = 2.0;
 static NSTimeInterval gDateLyricsLineHoldDuration = 2.0;
+static BOOL gDateLyricsPauseWhenScreenOff = YES;
+// Whether the SpringBoard consumer is active (screen on, or screen-off with
+// PauseWhenScreenOff disabled). Music reads this to decide whether to publish.
+static BOOL gDateLyricsConsumerActive = YES;
+// SpringBoard-side screen state. Only meaningful in the SpringBoard process.
+static BOOL gDateLyricsScreenIsOn = YES;
 
 static BOOL gDateLyricsDebugLogging = NO;
 static NSString *GetLyricsRootPath(void);
@@ -1552,6 +1559,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 %property (nonatomic, strong) NSNumber *amlLastSystemTime;
 %property (nonatomic, strong) NSNumber *amlLastPayloadPublishTime;
 %property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
+%property (nonatomic, strong) NSNumber *amlLastResolvedLineIndex;
 %property (assign, nonatomic) NSInteger amlLastStoreID;
 
 - (void)dealloc {
@@ -1679,6 +1687,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         self.amlCurrentPayloadSignature = nil;
         self.amlLastPayloadPublishTime = nil;
         self.amlLastResolvedElapsed = nil;
+        self.amlLastResolvedLineIndex = nil;
     }
 
     // Keep the position we resolve lyrics against monotonic.
@@ -1715,6 +1724,20 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         return;
     }
 
+    // Phase 1: screen-off gating.
+    // When PauseWhenScreenOff is enabled and the screen is off, skip the
+    // resolution and publish pipeline entirely — unless haptics are enabled,
+    // in which case we still resolve so we can fire haptic feedback, but we
+    // short-circuit the publish (file write + Darwin notification) at the end.
+    BOOL screenOffHapticsOnly = NO;
+    if (gDateLyricsPauseWhenScreenOff && !gDateLyricsConsumerActive) {
+        if (gDateLyricsHapticsEnabled) {
+            screenOffHapticsOnly = YES; // resolve but don't publish visuals
+        } else {
+            return; // nothing to do at all
+        }
+    }
+
     NSString *title = nil;
     id selectedLineID = nil;
     NSTimeInterval nextWordStart = -1.0;
@@ -1722,17 +1745,70 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
     BOOL suppressLineFallback = NO;
     NSDictionary *wordPayload = nil;
 
+    // Narrow the mutex to just the dictionary lookups. Once we have retained
+    // references to the arrays we can release the lock; ParseLyricsData only
+    // replaces the entire array under the lock, so the old array stays alive
+    // as long as we hold these local references.
     pthread_mutex_lock(&gLyricsCacheMutex);
-    
     NSArray<DateLyricsTimedLine *> *wordLines = gWordLyricsCache[@(storeID)];
-    for (DateLyricsTimedLine *origLine in [wordLines reverseObjectEnumerator]) {
-        DateLyricsTimedLine *line = DateLyricsGetFilteredLine(origLine);
-        if (!line) continue;
-        if (elapsedTime >= line.begin) {
-            if (line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration) {
-                suppressLineFallback = YES;
+    NSArray<MSVLyricsLine *> *lyricLines = gLyricsCache[@(storeID)];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+
+    // Cursor-based resolution: remember the index of the last resolved word-line
+    // so we don't rescan from the end on every tick. The typical case — position
+    // advancing forward — only needs to look at the cursor line and a few ahead.
+    // A backwards move (seek) falls back to a full reverse scan.
+    NSInteger cursorIndex = self.amlLastResolvedLineIndex ? [self.amlLastResolvedLineIndex integerValue] : -1;
+    NSInteger resolvedWordLineIndex = -1;
+
+    // Fast-path: try from cursor forward first.
+    if (cursorIndex >= 0 && cursorIndex < (NSInteger)wordLines.count) {
+        for (NSInteger i = cursorIndex; i < (NSInteger)wordLines.count; i++) {
+            DateLyricsTimedLine *line = DateLyricsGetFilteredLine(wordLines[i]);
+            if (!line) continue;
+            if (line.begin > elapsedTime) break; // haven't reached this line yet
+            if (line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration) continue;
+            resolvedWordLineIndex = i;
+        }
+        // If we found something and it's not the last line, also check
+        // whether a subsequent line has now started (fast forward).
+        if (resolvedWordLineIndex >= 0) {
+            for (NSInteger i = resolvedWordLineIndex + 1; i < (NSInteger)wordLines.count; i++) {
+                DateLyricsTimedLine *next = DateLyricsGetFilteredLine(wordLines[i]);
+                if (!next) continue;
+                if (next.begin > elapsedTime) break;
+                if (next.end > next.begin && elapsedTime > next.end + gDateLyricsLineHoldDuration) continue;
+                resolvedWordLineIndex = i;
+            }
+        }
+    }
+
+    // If the fast-path didn't find anything (no cursor, or position went backwards),
+    // fall back to the original reverse scan.
+    if (resolvedWordLineIndex < 0) {
+        for (NSInteger i = (NSInteger)wordLines.count - 1; i >= 0; i--) {
+            DateLyricsTimedLine *line = DateLyricsGetFilteredLine(wordLines[i]);
+            if (!line) continue;
+            if (elapsedTime >= line.begin) {
+                if (line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration) break;
+                resolvedWordLineIndex = i;
                 break;
             }
+        }
+    }
+
+    if (resolvedWordLineIndex >= 0) {
+        self.amlLastResolvedLineIndex = @(resolvedWordLineIndex);
+    }
+
+    // The cursor above found the line index; jump directly to it for word-level
+    // detail instead of re-scanning from the end. We also compute nextWordStart
+    // from the next line's begin time for timer scheduling.
+    if (resolvedWordLineIndex >= 0) {
+        DateLyricsTimedLine *line = DateLyricsGetFilteredLine(wordLines[resolvedWordLineIndex]);
+        if (line && elapsedTime >= line.begin &&
+            !(line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration)) {
+
             title = line.text;
             selectedLineID = @(line.begin);
             if (line.end > line.begin) currentLineExpiry = line.end + gDateLyricsLineHoldDuration;
@@ -1752,27 +1828,23 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
             BOOL hasPreviousWord = NO;
             NSTimeInterval activeForegroundWordBegin = -1.0;
             NSTimeInterval activeBackgroundWordBegin = -1.0;
-            NSUInteger cursor = 0;
-            
+            NSUInteger wordCursor = 0;
+
             for (DateLyricsTimedWord *word in line.words) {
-                cursor += word.separatorBefore.length;
-                NSRange wordRange = NSMakeRange(cursor, word.text.length);
+                wordCursor += word.separatorBefore.length;
+                NSRange wordRange = NSMakeRange(wordCursor, word.text.length);
                 NSUInteger segmentStart = wordRange.location;
                 if (hasPreviousWord && previousWordWasBackground == word.isBackground) {
                     segmentStart = word.isBackground ? previousBackgroundSegmentStart : previousForegroundSegmentStart;
                 }
-                
                 BOOL isActive = elapsedTime >= word.begin && elapsedTime < word.end;
                 if (word.isBackground) {
                     if (isActive && (backgroundActiveRange.location == NSNotFound || word.begin >= activeBackgroundWordBegin)) {
                         backgroundActiveRange = wordRange;
                         backgroundActiveRangeSegmentStart = segmentStart;
                         activeBackgroundWordBegin = word.begin;
-                        
                     }
-                    if (word.begin > elapsedTime && (nextBackgroundWordStart < 0 || word.begin < nextBackgroundWordStart)) {
-                        nextBackgroundWordStart = word.begin;
-                    }
+                    if (word.begin > elapsedTime && (nextBackgroundWordStart < 0 || word.begin < nextBackgroundWordStart)) nextBackgroundWordStart = word.begin;
                     if (word.end <= elapsedTime && word.end >= previousBackgroundWordEnd) {
                         previousBackgroundWordRange = wordRange;
                         previousBackgroundWordEnd = word.end;
@@ -1783,11 +1855,8 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
                         activeRange = wordRange;
                         activeRangeSegmentStart = segmentStart;
                         activeForegroundWordBegin = word.begin;
-                        
                     }
-                    if (word.begin > elapsedTime && (nextForegroundWordStart < 0 || word.begin < nextForegroundWordStart)) {
-                        nextForegroundWordStart = word.begin;
-                    }
+                    if (word.begin > elapsedTime && (nextForegroundWordStart < 0 || word.begin < nextForegroundWordStart)) nextForegroundWordStart = word.begin;
                     if (word.end <= elapsedTime && word.end >= previousForegroundWordEnd) {
                         previousForegroundWordRange = wordRange;
                         previousForegroundWordEnd = word.end;
@@ -1796,56 +1865,39 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
                 }
                 hasPreviousWord = YES;
                 previousWordWasBackground = word.isBackground;
-                cursor += word.text.length;
+                wordCursor += word.text.length;
             }
 
-            if (activeRange.location == NSNotFound &&
-                previousForegroundWordRange.location != NSNotFound &&
+            if (activeRange.location == NSNotFound && previousForegroundWordRange.location != NSNotFound &&
                 elapsedTime >= previousForegroundWordEnd &&
-                (nextForegroundWordStart < 0 || elapsedTime < nextForegroundWordStart) &&
-                elapsedTime <= line.end) {
+                (nextForegroundWordStart < 0 || elapsedTime < nextForegroundWordStart) && elapsedTime <= line.end) {
                 activeRange = previousForegroundWordRange;
                 activeRangeSegmentStart = previousForegroundSegmentStart;
-                
             }
-            if (backgroundActiveRange.location == NSNotFound &&
-                previousBackgroundWordRange.location != NSNotFound &&
+            if (backgroundActiveRange.location == NSNotFound && previousBackgroundWordRange.location != NSNotFound &&
                 elapsedTime >= previousBackgroundWordEnd &&
-                (nextBackgroundWordStart < 0 || elapsedTime < nextBackgroundWordStart) &&
-                elapsedTime <= line.end) {
+                (nextBackgroundWordStart < 0 || elapsedTime < nextBackgroundWordStart) && elapsedTime <= line.end) {
                 backgroundActiveRange = previousBackgroundWordRange;
                 backgroundActiveRangeSegmentStart = previousBackgroundSegmentStart;
-                
             }
 
-            if (nextForegroundWordStart > elapsedTime) {
-                nextWordStart = nextForegroundWordStart;
-            }
+            if (nextForegroundWordStart > elapsedTime) nextWordStart = nextForegroundWordStart;
             if (nextBackgroundWordStart > elapsedTime) {
-                if (nextWordStart < 0 || nextBackgroundWordStart < nextWordStart) {
-                    nextWordStart = nextBackgroundWordStart;
-                }
+                if (nextWordStart < 0 || nextBackgroundWordStart < nextWordStart) nextWordStart = nextBackgroundWordStart;
             }
 
             NSRange focusForegroundRange = activeRange;
             NSRange focusBackgroundRange = backgroundActiveRange;
-
-            if (activeRange.location != NSNotFound && gDateLyricsHighlightTrail && activeRangeSegmentStart != NSNotFound) {
+            if (activeRange.location != NSNotFound && gDateLyricsHighlightTrail && activeRangeSegmentStart != NSNotFound)
                 activeRange = NSMakeRange(activeRangeSegmentStart, NSMaxRange(activeRange) - activeRangeSegmentStart);
-            }
-            if (backgroundActiveRange.location != NSNotFound && gDateLyricsHighlightTrail && backgroundActiveRangeSegmentStart != NSNotFound) {
+            if (backgroundActiveRange.location != NSNotFound && gDateLyricsHighlightTrail && backgroundActiveRangeSegmentStart != NSNotFound)
                 backgroundActiveRange = NSMakeRange(backgroundActiveRangeSegmentStart, NSMaxRange(backgroundActiveRange) - backgroundActiveRangeSegmentStart);
-            }
 
             BOOL isLineFinished = YES;
             NSTimeInterval minWordBegin = -1.0;
             for (DateLyricsTimedWord *word in line.words) {
-                if (word.end > elapsedTime) {
-                    isLineFinished = NO;
-                }
-                if (minWordBegin < 0 || word.begin < minWordBegin) {
-                    minWordBegin = word.begin;
-                }
+                if (word.end > elapsedTime) isLineFinished = NO;
+                if (minWordBegin < 0 || word.begin < minWordBegin) minWordBegin = word.begin;
             }
             BOOL isLineStarted = (minWordBegin < 0) || (elapsedTime >= minWordBegin);
 
@@ -1861,18 +1913,32 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
             } else {
                 wordPayload = nil;
             }
-            
-            break;
-        } else if (line.begin > elapsedTime) {
-            if (nextWordStart < 0 || line.begin < nextWordStart) {
-                nextWordStart = line.begin;
+        } else {
+            suppressLineFallback = YES;
+        }
+        // Schedule the next timer boundary from the next word line's begin.
+        if (resolvedWordLineIndex + 1 < (NSInteger)wordLines.count) {
+            DateLyricsTimedLine *nextLine = DateLyricsGetFilteredLine(wordLines[resolvedWordLineIndex + 1]);
+            if (nextLine && nextLine.begin > elapsedTime) {
+                if (nextWordStart < 0 || nextLine.begin < nextWordStart) nextWordStart = nextLine.begin;
+            }
+        }
+    } else {
+        // No resolved line; find the next upcoming word-line start for the timer.
+        for (NSInteger i = 0; i < (NSInteger)wordLines.count; i++) {
+            DateLyricsTimedLine *upcomingLine = DateLyricsGetFilteredLine(wordLines[i]);
+            if (upcomingLine && upcomingLine.begin > elapsedTime) {
+                nextWordStart = upcomingLine.begin;
+                break;
             }
         }
     }
 
+
+
+
     NSTimeInterval nextLineStart = -1.0;
-    NSArray<MSVLyricsLine *> *lyricLines = gLyricsCache[@(storeID)];
-    
+
     for (MSVLyricsLine *line in [lyricLines reverseObjectEnumerator]) {
         if (elapsedTime >= line.startTime) {
             if (!title.length && !suppressLineFallback) {
@@ -1899,7 +1965,6 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
             }
         }
     }
-    pthread_mutex_unlock(&gLyricsCacheMutex);
 
     if (playbackRate <= 0.0f) {
         self.amlPauseTimer = [NSTimer scheduledTimerWithTimeInterval:gDateLyricsPauseTimeout target:self selector:@selector(amlPauseTimerFired:) userInfo:nil repeats:NO];
@@ -1955,7 +2020,13 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         self.amlCurrentLyricTitle = title;
         self.amlCurrentPayloadSignature = payloadSignature;
         self.amlLastPayloadPublishTime = @(now);
-        DateLyricsPublishPayload(payload);
+        // If screen is off and haptics-only mode is active, skip the visual
+        // publish (file write + Darwin notification) — haptics already fired
+        // above in DateLyricsCurrentLineChanged on the SpringBoard side, but
+        // that path is gated too. Here in Music we just avoid the IPC cost.
+        if (!screenOffHapticsOnly) {
+            DateLyricsPublishPayload(payload);
+        }
     }
 }
 
@@ -2723,6 +2794,7 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 2.0);
         gDateLyricsLineHoldDuration = getPrefDouble(@"LineHoldDuration", 2.0);
         gDateLyricsLineHoldDuration = MIN(MAX(gDateLyricsLineHoldDuration, 0.0), 10.0);
+        gDateLyricsPauseWhenScreenOff = getPrefBool(@"PauseWhenScreenOff", YES);
 
         if (!gDateLyricsEnabled) {
             if (DateLyricsIsSpringBoardHost()) {
@@ -2772,6 +2844,42 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
     }
 }
 
+// Screen-state bridge: SpringBoard observes system backlight notifications and
+// forwards them to Music via our own Darwin namespace.
+static void DateLyricsHandleScreenOff(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    gDateLyricsScreenIsOn = NO;
+    if (gDateLyricsPauseWhenScreenOff) {
+        gDateLyricsConsumerActive = NO;
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFSTR("com.shalamand3r.datelyrics/screenOff"), NULL, NULL, YES);
+    }
+}
+
+static void DateLyricsHandleScreenOn(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    gDateLyricsScreenIsOn = YES;
+    if (!gDateLyricsConsumerActive) {
+        gDateLyricsConsumerActive = YES;
+        // Tell Music to resume publishing.
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFSTR("com.shalamand3r.datelyrics/screenOn"), NULL, NULL, YES);
+        // Immediately re-apply whatever payload we last stored so there's no
+        // blank frame on wake.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            gDateLyricsCurrentPayload = [(DateLyricsStoredPayload() ?: @{}) copy];
+            DateLyricsApplyCurrentLineToAllCoverSheets();
+        });
+    }
+}
+
+// Music-side receivers for the screen-state bridge.
+static void DateLyricsHandleConsumerPaused(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    gDateLyricsConsumerActive = NO;
+}
+
+static void DateLyricsHandleConsumerResumed(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    gDateLyricsConsumerActive = YES;
+}
+
 %ctor {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -2797,7 +2905,19 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
         DateLyricsWriteRuntimeStatus();
         
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsCurrentLineChanged, kDateLyricsCurrentLineChangedNotification, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        
+
+        // Screen-off gating: observe backlight state and bridge it to Music.
+        // com.apple.springboard.hasBlankedScreen fires on screen-off;
+        // com.apple.springboard.didTurnOnDisplay fires on wake.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+            DateLyricsHandleScreenOff,
+            CFSTR("com.apple.springboard.hasBlankedScreen"), NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+            DateLyricsHandleScreenOn,
+            CFSTR("com.apple.springboard.didTurnOnDisplay"), NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
+
         %init(DateLyricsSpringBoard);
         DateLyricsSchedulePayloadExpiry(gDateLyricsCurrentPayload);
     } else if (DateLyricsIsMusicHost()) {
@@ -2808,5 +2928,16 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
         }
         %init(DateLyricsPrimary);
         DateLyricsWriteRuntimeStatus();
+
+        // Listen for SpringBoard's screen-state bridge notifications so Music
+        // knows when the consumer is active.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+            DateLyricsHandleConsumerPaused,
+            CFSTR("com.shalamand3r.datelyrics/screenOff"), NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+            DateLyricsHandleConsumerResumed,
+            CFSTR("com.shalamand3r.datelyrics/screenOn"), NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
     }
 }

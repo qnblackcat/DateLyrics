@@ -528,6 +528,32 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>Battery</string>
+			<key>footerText</key>
+			<string>Pause lyric updates while the screen is off to reduce battery usage. Haptics will still fire if enabled.</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>PauseWhenScreenOff</string>
+			<key>label</key>
+			<string>Pause When Screen Off</string>
+			<key>iconImageSystem</key>
+			<dict><key>name</key><string>battery.100.bolt</string></dict>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>Actions</string>
 			<key>footerText</key>
 			<string>Close Apple Music to apply changes.</string>
