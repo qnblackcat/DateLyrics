@@ -5,5 +5,9 @@
 @interface DateLyricsRootListController : PSListController
 @end
 
+@interface DateLyricsExperimentalListController : PSListController
+@end
+
 @interface DateLyricsFontListController : PSListItemsController
 @end
+
