@@ -9,9 +9,98 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>Musixmatch Fallback</string>
+			<key>footerText</key>
+			<string>Fetch timed lyrics from Musixmatch only when Apple Music has no usable timed score. This uses a community endpoint and may stop working.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>MusixmatchEnabled</string>
+			<key>label</key>
+			<string>Enable Musixmatch Fallback</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>globe</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Diagnostics</string>
+			<key>footerText</key>
+			<string>Temporarily write diagnostic events to /var/mobile/Library/DateLyrics/tweak-debug.log. Disable after testing.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>DebugLogging</string>
+			<key>label</key>
+			<string>Debug Logging</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>doc.text.magnifyingglass</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>View Debug Log</string>
+			<key>action</key>
+			<string>showDebugLog</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Copy Debug Log</string>
+			<key>action</key>
+			<string>copyDebugLog</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Clear Debug Log</string>
+			<key>action</key>
+			<string>clearDebugLog</string>
+			<key>isDestructive</key>
+			<true/>
+			<key>confirmation</key>
+			<dict>
+				<key>title</key>
+				<string>Clear Debug Log?</string>
+				<key>prompt</key>
+				<string>This permanently removes the current DateLyrics diagnostic log.</string>
+			</dict>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>Haptics</string>
 			<key>footerText</key>
-			<string>Provide haptic feedback on lyric changes.</string>
+			<string>Provide haptic feedback on lyric and line changes.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

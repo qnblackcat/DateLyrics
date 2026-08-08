@@ -156,6 +156,84 @@ static NSArray<DateLyricsPreviewLine *> *DateLyricsLoadPreviewLines(void) {
 static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
 static UIImage *_cachedGithubIcon = nil;
 
+static NSArray<NSString *> *DateLyricsDebugLogPaths(void) {
+    NSString *primaryPath = @"/var/mobile/Library/DateLyrics/tweak-debug.log";
+    NSString *rootlessPath = @"/var/jb/var/mobile/Library/DateLyrics/tweak-debug.log";
+    NSMutableArray *paths = [NSMutableArray arrayWithObject:primaryPath];
+    if (![paths containsObject:rootlessPath]) [paths addObject:rootlessPath];
+    Class proxyClass = NSClassFromString(@"LSApplicationProxy");
+    if ([proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+        id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:@"com.apple.Music"];
+        NSURL *containerURL = [proxy respondsToSelector:@selector(dataContainerURL)] ? [proxy performSelector:@selector(dataContainerURL)] : nil;
+        if (containerURL.path.length > 0) [paths addObject:[containerURL.path stringByAppendingPathComponent:@"Library/DateLyrics/tweak-debug.log"]];
+    }
+    return paths;
+}
+
+static NSString *DateLyricsCombinedDebugLogText(void) {
+    NSMutableString *combined = [NSMutableString string];
+    for (NSString *path in DateLyricsDebugLogPaths()) {
+        NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+        if (text.length > 0) [combined appendString:text];
+    }
+    return combined.length > 0 ? combined : nil;
+}
+
+static NSString *DateLyricsRecentLogText(NSString *text) {
+    if (text.length == 0) return nil;
+    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
+    NSUInteger maximumLines = 500;
+    if (lines.count <= maximumLines) return text;
+    return [[lines subarrayWithRange:NSMakeRange(lines.count - maximumLines, maximumLines)] componentsJoinedByString:@"\n"];
+}
+
+@interface DateLyricsLogViewController : UIViewController
+@property (nonatomic, copy) NSString *logText;
+@property (nonatomic, strong) UITextView *textView;
+@end
+
+@implementation DateLyricsLogViewController
+
+- (void)loadView {
+    self.textView = [[UITextView alloc] initWithFrame:CGRectZero];
+    self.textView.editable = NO;
+    self.textView.selectable = YES;
+    self.textView.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
+    self.textView.alwaysBounceVertical = YES;
+    self.textView.backgroundColor = [UIColor systemBackgroundColor];
+    self.textView.textColor = [UIColor labelColor];
+    self.view = self.textView;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Debug Log";
+    self.textView.text = self.logText.length > 0 ? self.logText : @"No log entries yet.";
+    UIBarButtonItem *copyButton = [[UIBarButtonItem alloc] initWithTitle:@"Copy"
+                                                                    style:UIBarButtonItemStylePlain
+                                                                   target:self
+                                                                   action:@selector(copyLog)];
+    UIBarButtonItem *clearButton = [[UIBarButtonItem alloc] initWithTitle:@"Clear"
+                                                                     style:UIBarButtonItemStylePlain
+                                                                    target:self
+                                                                    action:@selector(clearLog)];
+    self.navigationItem.rightBarButtonItems = @[copyButton, clearButton];
+}
+
+- (void)copyLog {
+    if (self.logText.length == 0) return;
+    UIPasteboard.generalPasteboard.string = self.logText;
+    self.navigationItem.rightBarButtonItems.firstObject.title = @"Copied";
+}
+
+- (void)clearLog {
+    for (NSString *path in DateLyricsDebugLogPaths()) [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    self.logText = nil;
+    self.textView.text = @"No log entries yet.";
+}
+
+@end
+
 static NSArray<NSDictionary<NSString *, NSString *> *> *DateLyricsFontOptions(void) {
 	static NSArray<NSDictionary<NSString *, NSString *> *> *cachedOptions = nil;
 	static dispatch_once_t onceToken;
@@ -935,6 +1013,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MinimumScale", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"DebugLogging", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"MusixmatchEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
@@ -1327,5 +1406,44 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		_specifiers = [self loadSpecifiersFromPlistName:@"Experimental" target:self];
 	}
 	return _specifiers;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [super tableView:tableView cellForRowAtIndexPath:indexPath];
+    PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
+    if ([[specifier propertyForKey:@"isDestructive"] boolValue]) {
+        cell.textLabel.textColor = UIColor.systemRedColor;
+    }
+    return cell;
+}
+
+- (void)showDebugLog {
+    NSString *logText = DateLyricsCombinedDebugLogText();
+    DateLyricsLogViewController *controller = [DateLyricsLogViewController new];
+    controller.logText = DateLyricsRecentLogText(logText);
+    [self.navigationController pushViewController:controller animated:YES];
+}
+
+- (void)copyDebugLog {
+    NSString *logText = DateLyricsRecentLogText(DateLyricsCombinedDebugLogText());
+    NSString *title = @"No Debug Log";
+    if (logText.length > 0) {
+        UIPasteboard.generalPasteboard.string = logText;
+        title = @"Debug Log Copied";
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                     message:nil
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)clearDebugLog {
+    for (NSString *path in DateLyricsDebugLogPaths()) [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Debug Log Cleared"
+                                                                     message:nil
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 @end
