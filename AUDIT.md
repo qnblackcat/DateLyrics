@@ -1,13 +1,47 @@
 # DateLyrics — Code Audit
 
 > **Status:** the items marked ✅ below were changed in the working tree (uncommitted).
-> Everything else is still open. **None of this has been compiled** — no Theos on the
-> machine that wrote it — so the first build may surface typos.
+> The earlier audit was written before Theos was available; the latest follow-up pass has now
+> been compiled successfully for arm64/arm64e.
 >
 > Fixed: §1.1 ✅ · §1.3 ✅ · §1.5 ✅ · §1.6 ✅ · §4.1 ✅ · §4.3 ✅ · §4.8 ✅ ·
 > §5.2 ✅ · §5.3 ✅ · §5.4 ✅ · §6.1 ✅
->
-> ### Attempted and reverted: snapshot-based line transitions
+
+## 2026-08-08 follow-up
+
+The current working tree has also been compiled successfully for arm64/arm64e with the rootless
+Theos package target. The lyric-ingestion path now rejects transcript-only TTML (`itunes:timing="None"`),
+rejects all-zero/malformed serialized scores, removes stale memory/disk scores, and suppresses retries
+for a known transcript-only Adam ID. SpringBoard clears an active score when its score file disappears.
+
+Paused position changes now publish anchors even for fine scrubs, and meaningful backward paused scrubs
+are marked as explicit seeks. Split-line plans are track-scoped and may move backward on a real seek;
+normal playback remains monotonic to avoid the old segment-0 snap-back. Debug logging is opt-in again.
+
+The package produced from this pass is `DateLyrics-2.2.1-unsynced-lyrics-filter-v3.deb` in the iCloud
+Drive root. The items below that describe the old payload/heartbeat pipeline should be read as historical
+notes; the active path is now the Music → anchor/score files → SpringBoard local ticker pipeline.
+
+## 2026-08-08 low-overhead cleanup
+
+The active tree was trimmed without changing the lyric protocol: removed the no-op
+`MPNowPlayingInfoCenter` hook and unused MediaRemote declarations, removed the permanently enabled
+`UseLocalTiming` branch and the old current-line bridge reset notifications from Preferences. The
+`PauseTimeout` control is now a real pause-only timer again: it keeps the last active lyric visible
+for the selected delay, then restores the stock date. Widget host discovery is now cached while the host remains
+in the view subtree, repeated widget hidden-state writes are guarded, and the Split Long Lines preference
+no longer recursively calls the controller to disable ad-libs. The package built successfully for
+arm64/arm64e after these changes. SpringBoard now caches a rendered payload per label, invalidating
+it on track/payload/preference/system-label changes, so ordinary UIKit layout passes do not rebuild
+the same attributed string. The Music request-session handoff and transcript-only negative cache are
+also serialized to avoid cross-callback races.
+
+The stock date is shown before the first timed line of a song and whenever a track has no usable score
+(including transcript-only/unsupported tracks). Once the first lyric has appeared, normal playback keeps
+that last lyric through later instrumental/timing gaps; the date no longer slips back into the lyric slot.
+The separate `PauseTimeout` setting still controls what happens after an actual pause.
+
+### Attempted and reverted: snapshot-based line transitions
 >
 > A rewrite that animated the outgoing line inside a throwaway clipped container
 > was tried and **backed out** — on device it left up to four copies of the same
@@ -20,7 +54,8 @@
 > its copy behind permanently. Nothing in the teardown path could reliably find
 > orphans. **Do not reintroduce extra views into that hierarchy.**
 >
-> The transition code is now byte-for-byte the previous `CATransition` behavior.
+> The transition still uses the proven `CATransition` path; reverse seeks now select the
+> opposite direction, while the two narrow guards below prevent mid-flight geometry/content races.
 > Two narrow guards were kept, both of which only ever *skip* work:
 > - `layoutSubviews` will not resize or repaint the label while a transition runs.
 > - Syllable updates arriving mid-transition are coalesced into one pending flag

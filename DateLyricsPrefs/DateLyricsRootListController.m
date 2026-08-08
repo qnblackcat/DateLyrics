@@ -154,10 +154,6 @@ static NSArray<DateLyricsPreviewLine *> *DateLyricsLoadPreviewLines(void) {
 }
 
 static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
-static NSString *const kDateLyricsBridgeFilePath = @"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.current-line.txt";
-static NSString *const kDateLyricsLegacyBridgeFilePath = @"/var/mobile/Library/Preferences/com.82flex.amlyrics.current-line.txt";
-static CFStringRef const kDateLyricsCurrentLineChangedNotification = CFSTR("com.shalamand3r.datelyrics.current-line.changed");
-static CFStringRef const kDateLyricsLegacyCurrentLineChangedNotification = CFSTR("com.82flex.amlyrics.current-line.changed");
 static UIImage *_cachedGithubIcon = nil;
 
 static NSArray<NSDictionary<NSString *, NSString *> *> *DateLyricsFontOptions(void) {
@@ -221,13 +217,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         NSMutableDictionary *values = [NSMutableDictionary dictionary];
         values[@"ForceLowercase"] = @([prefs boolForKey:@"ForceLowercase"]);
         values[@"WordHighlighting"] = @([prefs objectForKey:@"WordHighlighting"] ? [prefs boolForKey:@"WordHighlighting"] : YES);
-        NSInteger highlightStyle = [prefs objectForKey:@"HighlightStyle"] ? (NSInteger)[prefs integerForKey:@"HighlightStyle"] : 2;
-        BOOL highlightTrail = [prefs objectForKey:@"HighlightTrail"] ? [prefs boolForKey:@"HighlightTrail"] : YES;
-        if (highlightStyle == 2) {
-                highlightTrail = YES;
-        }
-        values[@"HighlightTrail"] = @(highlightTrail);
-        values[@"HighlightStyle"] = @(highlightStyle);
         values[@"UseCustomFont"] = @([prefs boolForKey:@"UseCustomFont"]);
         values[@"TransitionsEnabled"] = @([prefs objectForKey:@"TransitionsEnabled"] ? [prefs boolForKey:@"TransitionsEnabled"] : YES);
         values[@"TransitionStyle"] = @([prefs objectForKey:@"TransitionStyle"] ? (NSInteger)[prefs integerForKey:@"TransitionStyle"] : 1);
@@ -237,8 +226,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         values[@"MinimumScale"] = minScale ?: @0.55;
         NSString *fontName = [prefs objectForKey:@"CustomFontName"];
         if ([fontName isKindOfClass:NSString.class]) values[@"CustomFontName"] = fontName;
-        id strokeValue = [prefs objectForKey:@"StrokeWidth"];
-        values[@"StrokeWidth"] = strokeValue ?: @3.0;
         values[@"SplitLongLines"] = @([prefs objectForKey:@"SplitLongLines"] ? [prefs boolForKey:@"SplitLongLines"] : YES);
         values[@"ShowAdlibs"] = @([prefs objectForKey:@"ShowAdlibs"] ? [prefs boolForKey:@"ShowAdlibs"] : NO);
         return values;
@@ -500,9 +487,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		NSMutableArray *specs = [[self loadSpecifiersFromPlistName:@"Root" target:self] mutableCopy];
 		NSDictionary *prefs = DateLyricsCurrentPrefs();
 		BOOL showsFontStyle = [prefs[@"UseCustomFont"] boolValue];
-		BOOL highlightingEnabled = [prefs[@"WordHighlighting"] boolValue];
-		BOOL showsStrokeSlider = highlightingEnabled && [prefs[@"HighlightStyle"] integerValue] == 0;
-		BOOL isOpacityStyle = highlightingEnabled && [prefs[@"HighlightStyle"] integerValue] == 2;
 		BOOL transitionsEnabled = prefs[@"TransitionsEnabled"] ? [prefs[@"TransitionsEnabled"] boolValue] : YES;
 		BOOL splitLongLinesEnabled = [prefs[@"SplitLongLines"] boolValue];
 
@@ -515,12 +499,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 
 		NSIndexSet *visibilityIndexes = [specs indexesOfObjectsPassingTest:^BOOL(PSSpecifier *spec, NSUInteger idx, BOOL *stop) {
 			NSString *key = [[spec propertyForKey:@"key"] description];
-			if ([key isEqualToString:@"HighlightStyle"] || [key isEqualToString:@"HighlightTrail"]) {
-				return !highlightingEnabled;
-			}
-			if ([key isEqualToString:@"StrokeWidth"]) {
-				return !showsStrokeSlider;
-			}
 			if ([key isEqualToString:@"TransitionStyle"] || [key isEqualToString:@"TransitionDuration"]) {
 				return !transitionsEnabled;
 			}
@@ -554,9 +532,6 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 				[spec setProperty:(splitLongLinesEnabled ? @NO : @YES) forKey:@"enabled"];
 			}
 
-			if ([specifierKey isEqualToString:@"HighlightTrail"]) {
-				[spec setProperty:(isOpacityStyle ? @NO : @YES) forKey:@"enabled"];
-			}
 		}
 
 		_specifiers = [specs copy];
@@ -614,11 +589,8 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         NSDictionary *prefs = DateLyricsCurrentPrefs();
         BOOL forceLowercase = [prefs[@"ForceLowercase"] boolValue];
         BOOL wordHighlighting = [prefs[@"WordHighlighting"] boolValue];
-        BOOL keepPastHighlighted = [prefs[@"HighlightTrail"] boolValue];
-        NSInteger highlightStyle = [prefs[@"HighlightStyle"] integerValue];
         BOOL useCustomFont = [prefs[@"UseCustomFont"] boolValue];
         BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
-        CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
         BOOL splitLongLines = [prefs[@"SplitLongLines"] boolValue];
 
         DateLyricsPreviewLine *previewLine = nil;
@@ -762,27 +734,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         if (wordHighlighting && wordRanges.count > 0) {
                 BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
 
-                if (highlightStyle == 2) {
-                        UIColor *textColor = [UIColor labelColor];
-                        UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
-                        [attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-                        if (hasActiveWord) {
-                                NSRange activeRange = [wordRanges[wordIdx] rangeValue];
-                                NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
-                                if (NSMaxRange(highlightRange) <= attributed.length) {
-                                        [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
-                                }
-                        }
-                } else if (hasActiveWord) {
+                UIColor *textColor = [UIColor labelColor];
+                UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+                [attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
+                if (hasActiveWord) {
                         NSRange activeRange = [wordRanges[wordIdx] rangeValue];
-                        NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
-                        if (NSMaxRange(highlightRange) > attributed.length) highlightRange = NSMakeRange(0, attributed.length);
-                        if (highlightStyle == 1) {
-                                NSString *substring = [baseText substringWithRange:highlightRange];
-                                [attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
-                        } else {
-                                [attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
-                                [attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+                        NSRange highlightRange = NSMakeRange(0, NSMaxRange(activeRange));
+                        if (NSMaxRange(highlightRange) <= attributed.length) {
+                                [attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
                         }
                 }
         }
@@ -883,27 +842,10 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 			NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
 			[prefs setBool:NO forKey:@"ShowAdlibs"];
 			[prefs synchronize];
-
-			PSSpecifier *adlibsSpec = [self specifierForID:@"ShowAdlibs"];
-			if (adlibsSpec) {
-				[self setPreferenceValue:@NO specifier:adlibsSpec];
-			}
 		}
 	}
 
-	if ([key isEqualToString:@"HighlightStyle"]) {
-		if ([value integerValue] == 2) {
-			NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
-			[prefs setBool:YES forKey:@"HighlightTrail"];
-			[prefs synchronize];
-
-			CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightTrail", kCFBooleanTrue, (__bridge CFStringRef)kDateLyricsPrefsSuite);
-			CFPreferencesAppSynchronize((__bridge CFStringRef)kDateLyricsPrefsSuite);
-		}
-	}
-
-	if ([key isEqualToString:@"HighlightStyle"] ||
-	        [key isEqualToString:@"WordHighlighting"] ||
+	if ([key isEqualToString:@"WordHighlighting"] ||
 	        [key isEqualToString:@"UseCustomFont"] ||
 	        [key isEqualToString:@"TransitionsEnabled"] ||
 	        [key isEqualToString:@"MinimumScale"] ||
@@ -985,17 +927,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"Enabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"ForceLowercase", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"WordHighlighting", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
-    CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightTrail", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
-    CFPreferencesSetAppValue((__bridge CFStringRef)@"HighlightStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticStyleSyllable", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticStyleLine", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"UseCustomFont", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"CustomFontName", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
-    CFPreferencesSetAppValue((__bridge CFStringRef)@"StrokeWidth", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MinimumScale", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"DebugLogging", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
-    CFPreferencesSetAppValue((__bridge CFStringRef)@"LineHoldDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
@@ -1020,22 +959,10 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         }
     }
 
-    NSArray *sharedPaths = @[
-        kDateLyricsBridgeFilePath,
-        kDateLyricsLegacyBridgeFilePath
-    ];
-    for (NSString *path in sharedPaths) {
-        if ([fileManager fileExistsAtPath:path]) {
-            [fileManager removeItemAtPath:path error:nil];
-        }
-    }
-
     [self reload];
 
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)@"com.shalamand3r.datelyrics/ClearCaches", NULL, NULL, YES);
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (CFStringRef)@"com.shalamand3r.datelyrics/ReloadPrefs", NULL, NULL, YES);
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsCurrentLineChangedNotification, NULL, NULL, YES);
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), kDateLyricsLegacyCurrentLineChangedNotification, NULL, NULL, YES);
 	self.resetInProgress = NO;
 }
 
@@ -1118,10 +1045,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	NSDictionary *prefs = DateLyricsCurrentPrefs();
 	BOOL forceLowercase = [prefs[@"ForceLowercase"] boolValue];
 	BOOL wordHighlighting = [prefs[@"WordHighlighting"] boolValue];
-	BOOL keepPastHighlighted = [prefs[@"HighlightTrail"] boolValue];
-	NSInteger highlightStyle = [prefs[@"HighlightStyle"] integerValue];
 	BOOL showAdlibs = [prefs[@"ShowAdlibs"] boolValue];
-	CGFloat strokeWidth = [prefs[@"StrokeWidth"] respondsToSelector:@selector(floatValue)] ? [prefs[@"StrokeWidth"] floatValue] : 3.0f;
 	CGFloat minimumScale = [prefs[@"MinimumScale"] floatValue];
 
 	NSString *baseText = nil;
@@ -1199,27 +1123,14 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		}
 
 		BOOL hasActiveWord = (wordIdx >= 0 && wordIdx < (NSInteger)wordRanges.count);
-		if (highlightStyle == 2) {
-			UIColor *textColor = [UIColor labelColor];
-			UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
-			[attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
-			if (hasActiveWord) {
-				NSRange activeRange = [wordRanges[wordIdx] rangeValue];
-				NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
-				if (NSMaxRange(highlightRange) <= attributed.length) {
-					[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
-				}
-			}
-		} else if (hasActiveWord) {
+		UIColor *textColor = [UIColor labelColor];
+		UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+		[attributed addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, attributed.length)];
+		if (hasActiveWord) {
 			NSRange activeRange = [wordRanges[wordIdx] rangeValue];
-			NSRange highlightRange = keepPastHighlighted ? NSMakeRange(0, NSMaxRange(activeRange)) : activeRange;
-			if (NSMaxRange(highlightRange) > attributed.length) highlightRange = NSMakeRange(0, attributed.length);
-			if (highlightStyle == 1) {
-				NSString *substring = [baseText substringWithRange:highlightRange];
-				[attributed replaceCharactersInRange:highlightRange withString:substring.uppercaseString];
-			} else {
-				[attributed addAttribute:NSStrokeWidthAttributeName value:@(-strokeWidth) range:highlightRange];
-				[attributed addAttribute:NSStrokeColorAttributeName value:[UIColor labelColor] range:highlightRange];
+			NSRange highlightRange = NSMakeRange(0, NSMaxRange(activeRange));
+			if (NSMaxRange(highlightRange) <= attributed.length) {
+				[attributed addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
 			}
 		}
 	}
@@ -1418,4 +1329,3 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	return _specifiers;
 }
 @end
-

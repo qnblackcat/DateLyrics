@@ -131,86 +131,6 @@
 
 		<dict>
 			<key>cell</key>
-			<string>PSSegmentCell</string>
-			<key>id</key>
-			<string>HighlightStyleCell</string>
-			<key>default</key>
-			<integer>2</integer>
-			<key>defaults</key>
-			<string>com.shalamand3r.datelyrics</string>
-			<key>PostNotification</key>
-			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			<key>key</key>
-			<string>HighlightStyle</string>
-			<key>requires</key>
-			<string>WordHighlighting</string>
-			<key>validTitles</key>
-			<array>
-				<string>Opacity</string>
-				<string>Stroke</string>
-				<string>Caps</string>
-			</array>
-			<key>validValues</key>
-			<array>
-				<integer>2</integer>
-				<integer>0</integer>
-				<integer>1</integer>
-			</array>
-		</dict>
-
-		<dict>
-			<key>cell</key>
-			<string>PSSliderCell</string>
-			<key>key</key>
-			<string>StrokeWidth</string>
-			<key>label</key>
-			<string>Outline Thickness</string>
-			<key>min</key>
-			<real>1.0</real>
-			<key>max</key>
-			<real>7.0</real>
-			<key>isSegmented</key>
-			<true/>
-			<key>segmentCount</key>
-			<integer>6</integer>
-			<key>snapsToSegment</key>
-			<true/>
-			<key>default</key>
-			<real>3.0</real>
-			<key>showValue</key>
-			<true/>
-			<key>defaults</key>
-			<string>com.shalamand3r.datelyrics</string>
-			<key>PostNotification</key>
-			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			<key>requires</key>
-			<string>WordHighlighting</string>
-		</dict>
-
-		<dict>
-			<key>cell</key>
-			<string>PSSwitchCell</string>
-			<key>key</key>
-			<string>HighlightTrail</string>
-			<key>label</key>
-			<string>Keep Past Syllables Highlighted</string>
-			<key>iconImageSystem</key>
-			<dict>
-				<key>name</key>
-				<string>text.line.first.and.arrowtriangle.forward</string>
-			</dict>
-			<key>default</key>
-			<true/>
-			<key>defaults</key>
-			<string>com.shalamand3r.datelyrics</string>
-			<key>PostNotification</key>
-			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-			<key>requires</key>
-			<string>WordHighlighting</string>
-		</dict>
-
-		<dict>
-			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Line Transitions</string>
@@ -357,45 +277,9 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>Instrumental Gaps</string>
-			<key>footerText</key>
-			<string>How long to keep the last lyric visible after its timing ends.</string>
-		</dict>
-
-		<dict>
-			<key>cell</key>
-			<string>PSSliderCell</string>
-			<key>key</key>
-			<string>LineHoldDuration</string>
-			<key>label</key>
-			<string>Hold Duration</string>
-			<key>min</key>
-			<real>0.0</real>
-			<key>max</key>
-			<real>10.0</real>
-			<key>isSegmented</key>
-			<true/>
-			<key>segmentCount</key>
-			<integer>10</integer>
-			<key>snapsToSegment</key>
-			<true/>
-			<key>default</key>
-			<real>2.0</real>
-			<key>showValue</key>
-			<true/>
-			<key>defaults</key>
-			<string>com.shalamand3r.datelyrics</string>
-			<key>PostNotification</key>
-			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
-		</dict>
-
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
 			<string>Hide Lyrics Delay</string>
 			<key>footerText</key>
-			<string>Delay before hiding lyrics when music is paused.</string>
+			<string>How long to keep the current lyric visible after music is paused.</string>
 		</dict>
 
 		<dict>
@@ -431,7 +315,7 @@
 			<key>label</key>
 			<string>Experimental</string>
 			<key>footerText</key>
-			<string>Advanced options including haptics and local timing.</string>
+			<string>Advanced options including haptics.</string>
 		</dict>
 
 		<dict>

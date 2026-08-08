@@ -29,15 +29,9 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 
 @interface MRContentItemMetadata : NSObject
 @property (assign, nonatomic) NSInteger iTunesStoreIdentifier;
-@property (assign, nonatomic) BOOL hasITunesStoreIdentifier;
-@property (copy, nonatomic) NSString *title;
-@property (copy, nonatomic) NSString *trackArtistName;
-@property (nonatomic, copy) NSString *amLyricsTitle;
 @property (assign, nonatomic) NSTimeInterval elapsedTime;
 @property (assign, nonatomic) BOOL lyricsAvailable;
-@property (assign, nonatomic) BOOL hasLyricsAvailable;
 @property (assign, nonatomic) NSInteger lyricsAdamID;
-@property (assign, nonatomic) BOOL hasLyricsAdamID;
 @end
 
 @interface MRContentItem : NSObject
@@ -46,17 +40,10 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 
 @interface MPNowPlayingContentItem : MPContentItem
 @property (assign, nonatomic) NSInteger storeID;
-@property (nonatomic, strong) NSTimer *amlTimer;
-@property (nonatomic, strong) NSTimer *amlPauseTimer;
-@property (nonatomic, copy) NSString *amlCurrentLyricTitle;
-@property (nonatomic, copy) NSString *amlCurrentPayloadSignature;
 @property (assign, nonatomic) float playbackRate;
 @property (nonatomic, strong) NSNumber *amlPlaybackRate;
 @property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
 @property (nonatomic, strong) NSNumber *amlLastSystemTime;
-@property (nonatomic, strong) NSNumber *amlLastPayloadPublishTime;
-@property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
-@property (nonatomic, strong) NSNumber *amlLastResolvedLineIndex;
 @property (assign, nonatomic) NSInteger amlLastStoreID;
 - (NSTimeInterval)calculatedElapsedTime;
 - (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
@@ -75,11 +62,6 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @interface MRNowPlayingPlayerClient : NSObject
 @property (nonatomic, readonly) MRContentItem *nowPlayingContentItem;
 - (void)sendContentItemChanges:(NSArray<MRContentItem *> *)contentItems;
-@end
-
-@interface MPNowPlayingInfoCenter (Private)
-- (MPNowPlayingContentItem *)nowPlayingContentItem;
-@property (nonatomic, assign) NSUInteger playbackState;
 @end
 
 @interface LSApplicationProxy : NSObject
@@ -143,6 +125,40 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 - (instancetype)initWithJSONData:(NSData *)data;
 @end
 
+static BOOL DateLyricsSerializedLinesHaveTiming(NSArray *rawLines) {
+    if (![rawLines isKindOfClass:NSArray.class] || rawLines.count == 0) return NO;
+
+    BOOL hasTiming = NO;
+    for (id rawLine in rawLines) {
+        if (![rawLine isKindOfClass:NSDictionary.class]) return NO;
+        NSDictionary *line = (NSDictionary *)rawLine;
+        NSNumber *begin = line[@"begin"];
+        NSNumber *end = line[@"end"];
+        if (![begin isKindOfClass:NSNumber.class] || ![end isKindOfClass:NSNumber.class] ||
+            !isfinite(begin.doubleValue) || !isfinite(end.doubleValue)) {
+            return NO;
+        }
+        if (end.doubleValue > begin.doubleValue || begin.doubleValue > 0.001) hasTiming = YES;
+        // Line-synced TTML may expose only a start time; a non-zero start still
+        // establishes an actual timeline.  The all-zero transcript score does
+        // not pass this check.
+
+        NSArray *rawWords = line[@"words"];
+        if (rawWords && ![rawWords isKindOfClass:NSArray.class]) return NO;
+        for (id rawWord in rawWords) {
+            if (![rawWord isKindOfClass:NSDictionary.class]) return NO;
+            NSNumber *wordBegin = rawWord[@"b"];
+            NSNumber *wordEnd = rawWord[@"e"];
+            if (![wordBegin isKindOfClass:NSNumber.class] || ![wordEnd isKindOfClass:NSNumber.class] ||
+                !isfinite(wordBegin.doubleValue) || !isfinite(wordEnd.doubleValue)) {
+                return NO;
+            }
+            if (wordEnd.doubleValue > wordBegin.doubleValue) hasTiming = YES;
+        }
+    }
+    return hasTiming;
+}
+
 @implementation DateLyricsScore
 - (instancetype)initWithJSONData:(NSData *)data {
     if ((self = [super init])) {
@@ -150,14 +166,22 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
         if (![json isKindOfClass:[NSDictionary class]] || ![json[@"kind"] isEqualToString:@"score"]) return nil;
         self.trackId = [json[@"trackId"] integerValue];
         self.hasWordTiming = [json[@"hasWordTiming"] boolValue];
+        NSArray *rawLines = json[@"lines"];
+        if (self.trackId <= 0 || !DateLyricsSerializedLinesHaveTiming(rawLines)) return nil;
         NSMutableArray *parsedLines = [NSMutableArray array];
-        for (NSDictionary *lineDict in json[@"lines"]) {
+        for (id rawLine in rawLines) {
+            if (![rawLine isKindOfClass:NSDictionary.class]) continue;
+            NSDictionary *lineDict = (NSDictionary *)rawLine;
             DateLyricsTimedLine *line = [DateLyricsTimedLine new];
             line.begin = [lineDict[@"begin"] doubleValue];
             line.end = [lineDict[@"end"] doubleValue];
             line.text = lineDict[@"text"];
             NSMutableArray *parsedWords = [NSMutableArray array];
-            for (NSDictionary *wordDict in lineDict[@"words"]) {
+            id wordsValue = lineDict[@"words"];
+            NSArray *rawWords = [wordsValue isKindOfClass:NSArray.class] ? wordsValue : @[];
+            for (id rawWord in rawWords) {
+                if (![rawWord isKindOfClass:NSDictionary.class]) continue;
+                NSDictionary *wordDict = (NSDictionary *)rawWord;
                 DateLyricsTimedWord *word = [DateLyricsTimedWord new];
                 word.begin = [wordDict[@"b"] doubleValue];
                 word.end = [wordDict[@"e"] doubleValue];
@@ -175,8 +199,6 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 }
 @end
 
-static BOOL gDateLyricsHighlightTrail = YES;
-static NSTimeInterval gDateLyricsLineHoldDuration = 2.0;
 static NSInteger gDateLyricsHapticStyleSyllable = 1;
 static NSInteger gDateLyricsHapticStyleLine = 2;
 
@@ -192,22 +214,24 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
         return nil;
     }
     
-    __attribute__((unused)) NSString *title = nil;
     id selectedLineID = nil;
     NSTimeInterval nextWordStart = -1.0;
-    NSTimeInterval currentLineExpiry = -1.0;
     NSDictionary *wordPayload = nil;
     
     NSInteger cursorIndex = cursorInOut ? *cursorInOut : -1;
     NSInteger resolvedLineIndex = -1;
     NSArray<DateLyricsTimedLine *> *lines = score.lines;
+
+    // The date owns the slot only before the first lyric. Once a line has
+    // started, keep the most recent line selected through any later
+    // instrumental gap; allowing the resolver to expire it is what made the
+    // stock date slip back into the lyric slot mid-song.
     
     if (cursorIndex >= 0 && cursorIndex < (NSInteger)lines.count) {
         for (NSInteger i = cursorIndex; i < (NSInteger)lines.count; i++) {
             DateLyricsTimedLine *line = DateLyricsGetFilteredLine(lines[i]);
             if (!line) continue;
             if (line.begin > elapsedTime) break;
-            if (line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration) continue;
             resolvedLineIndex = i;
         }
         if (resolvedLineIndex >= 0) {
@@ -215,7 +239,6 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                 DateLyricsTimedLine *next = DateLyricsGetFilteredLine(lines[i]);
                 if (!next) continue;
                 if (next.begin > elapsedTime) break;
-                if (next.end > next.begin && elapsedTime > next.end + gDateLyricsLineHoldDuration) continue;
                 resolvedLineIndex = i;
             }
         }
@@ -226,7 +249,6 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
             DateLyricsTimedLine *line = DateLyricsGetFilteredLine(lines[i]);
             if (!line) continue;
             if (elapsedTime >= line.begin) {
-                if (line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration) break;
                 resolvedLineIndex = i;
                 break;
             }
@@ -237,12 +259,9 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
     
     if (resolvedLineIndex >= 0) {
         DateLyricsTimedLine *line = DateLyricsGetFilteredLine(lines[resolvedLineIndex]);
-        if (line && elapsedTime >= line.begin &&
-            !(line.end > line.begin && elapsedTime > line.end + gDateLyricsLineHoldDuration)) {
+        if (line && elapsedTime >= line.begin) {
             
-            title = line.text;
             selectedLineID = @(line.begin);
-            if (line.end > line.begin) currentLineExpiry = line.end + gDateLyricsLineHoldDuration;
             
             if (score.hasWordTiming) {
                 NSRange activeRange = NSMakeRange(NSNotFound, 0);
@@ -321,9 +340,9 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                 
                 NSRange focusForegroundRange = activeRange;
                 NSRange focusBackgroundRange = backgroundActiveRange;
-                if (activeRange.location != NSNotFound && gDateLyricsHighlightTrail && activeRangeSegmentStart != NSNotFound)
+                if (activeRange.location != NSNotFound && activeRangeSegmentStart != NSNotFound)
                     activeRange = NSMakeRange(activeRangeSegmentStart, NSMaxRange(activeRange) - activeRangeSegmentStart);
-                if (backgroundActiveRange.location != NSNotFound && gDateLyricsHighlightTrail && backgroundActiveRangeSegmentStart != NSNotFound)
+                if (backgroundActiveRange.location != NSNotFound && backgroundActiveRangeSegmentStart != NSNotFound)
                     backgroundActiveRange = NSMakeRange(backgroundActiveRangeSegmentStart, NSMaxRange(backgroundActiveRange) - backgroundActiveRangeSegmentStart);
                 
                 BOOL isLineFinished = YES;
@@ -377,7 +396,6 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
     
     NSTimeInterval nextTrigger = -1.0;
     if (nextWordStart > elapsedTime) nextTrigger = nextWordStart;
-    if (currentLineExpiry > elapsedTime && (nextTrigger < 0 || currentLineExpiry < nextTrigger)) nextTrigger = currentLineExpiry;
     
     if (nextTriggerOut) *nextTriggerOut = nextTrigger;
     
@@ -397,6 +415,7 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
 @interface DateLyricsSplitPlan : NSObject
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, strong) id lineId;
+@property (nonatomic, assign) NSInteger trackId;
 @property (nonatomic, assign) CGFloat width;
 @property (nonatomic, copy) NSString *fontKey;
 @property (nonatomic, strong) NSArray<NSValue *> *segments;
@@ -416,26 +435,49 @@ static NSString *gLyricsRootPath = nil;
 static NSMutableDictionary<NSNumber *, NSArray<MSVLyricsLine *> *> *gLyricsCache = nil;
 static NSMutableDictionary<NSNumber *, NSArray<DateLyricsTimedLine *> *> *gWordLyricsCache = nil;
 static NSMutableArray<NSNumber *> *gLyricsCacheOrder = nil;
+// Transcript-only files are a valid Apple response, but they are not useful to
+// DateLyrics.  Remember rejected Adam IDs for this Music process so every
+// now-playing update does not refetch the same unsynchronised document.
+static NSMutableSet<NSNumber *> *gUnsynchronizedLyricsIDs = nil;
 static pthread_mutex_t gLyricsCacheMutex = PTHREAD_MUTEX_INITIALIZER;
-static MPNowPlayingInfoCenter *gNowPlayingInfoCenter = nil;
 static __weak MPNowPlayingContentItem *gCurrentContentItem = nil;
+
+static BOOL DateLyricsIsUnsynchronizedLyricsID(NSInteger lyricsAdamID) {
+    if (lyricsAdamID <= 0) return NO;
+    NSNumber *key = @(lyricsAdamID);
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    BOOL known = [gUnsynchronizedLyricsIDs containsObject:key];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+    return known;
+}
+
+static void DateLyricsSetUnsynchronizedLyricsID(NSInteger lyricsAdamID, BOOL unsynchronized) {
+    if (lyricsAdamID <= 0) return;
+    NSNumber *key = @(lyricsAdamID);
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    if (unsynchronized) {
+        [gUnsynchronizedLyricsIDs addObject:key];
+    } else {
+        [gUnsynchronizedLyricsIDs removeObject:key];
+    }
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+}
 
 static BOOL gDateLyricsEnabled = YES;
 static BOOL gDateLyricsForceLowercase = NO;
 static BOOL gDateLyricsWordHighlighting = YES;
-static NSInteger gDateLyricsHighlightStyle = 2;
 static BOOL gDateLyricsUseCustomFont = NO;
 static NSString *gDateLyricsCustomFontName = nil;
 static BOOL gDateLyricsTransitionsEnabled = YES;
 static NSInteger gDateLyricsTransitionStyle = 1;
 static NSTimeInterval gDateLyricsTransitionDuration = 0.3;
-static CGFloat gDateLyricsStrokeWidth = 3.0;
 static BOOL gDateLyricsSplitLongLines = YES;
 static BOOL gDateLyricsShowAdlibs = NO;
 static CGFloat gDateLyricsMinimumScale = 0.55;
 static NSTimeInterval gDateLyricsPauseTimeout = 2.0;
-static BOOL gDateLyricsUseLocalTiming = YES; // Local timing (Phase 3/4) permanently enabled
-static BOOL gDateLyricsDebugLogging = YES;
+// Keep disk logging opt-in.  The diagnostic path writes asynchronously on every
+// ticker/render event and should never be enabled in a normal install.
+static BOOL gDateLyricsDebugLogging = NO;
 static NSString *GetLyricsRootPath(void);
 static BOOL DateLyricsIsSpringBoardHost(void);
 static BOOL DateLyricsIsMusicHost(void);
@@ -483,14 +525,21 @@ static NSDictionary *gDateLyricsCurrentPayload = nil;
 static DateLyricsScore *gDateLyricsCurrentScore = nil;
 static NSDictionary *gDateLyricsLocalAnchor = nil; // { elapsed, rate, atHostTime, trackId }
 static dispatch_source_t gDateLyricsTicker = nil;
+static dispatch_source_t gDateLyricsPauseHideTimer = nil;
 static NSInteger gDateLyricsResolverCursor = -1;
+// Bumped when a render-affecting payload, track, or preference changes. Labels
+// use it to avoid rebuilding the same attributed string on every UIKit layout.
+static NSUInteger gDateLyricsRenderGeneration = 1;
 // MediaRemote's authoritative clock can arrive a few milliseconds behind our
 // extrapolated anchor. Keep only the lyric-resolution clock monotonic within one
 // track; the anchor itself remains untouched so playback and real seeks stay true.
 static NSInteger gDateLyricsLastResolvedTrackId = 0;
 static NSTimeInterval gDateLyricsLastResolvedElapsed = -1.0;
+static BOOL gDateLyricsLastResolutionWasBackwardSeek = NO;
 static const NSTimeInterval kDateLyricsJitterBackstepLimit = 1.0;
 static void DateLyricsScheduleTicker(void);
+static void DateLyricsCancelPauseHideTimer(void);
+static void DateLyricsSchedulePauseHideTimer(void);
 
 static NSTimeInterval DateLyricsMonotonicTime(void) {
     return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1e9;
@@ -499,13 +548,58 @@ static NSTimeInterval DateLyricsMonotonicTime(void) {
 static void DateLyricsPlayHaptic(NSInteger style);
 static NSString *DateLyricsHighlightSignature(NSDictionary *payload);
 
+static void DateLyricsCancelPauseHideTimer(void) {
+    if (gDateLyricsPauseHideTimer) {
+        dispatch_source_cancel(gDateLyricsPauseHideTimer);
+        gDateLyricsPauseHideTimer = nil;
+    }
+}
+
+static void DateLyricsSchedulePauseHideTimer(void) {
+    NSDictionary *payload = gDateLyricsCurrentPayload;
+    if (![payload[@"text"] isKindOfClass:NSString.class] || [payload[@"text"] length] == 0) {
+        DateLyricsCancelPauseHideTimer();
+        return;
+    }
+
+    // Repeated paused anchors are expected; do not reset the delay every time
+    // MediaRemote refreshes the same zero-rate position.
+    if (gDateLyricsPauseHideTimer) return;
+
+    NSTimeInterval delay = MAX(0.0, gDateLyricsPauseTimeout);
+    if (delay <= 0.0) {
+        gDateLyricsCurrentPayload = nil;
+        gDateLyricsRenderGeneration++;
+        DateLyricsApplyCurrentLineToAllCoverSheets();
+        return;
+    }
+
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    gDateLyricsPauseHideTimer = timer;
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 0);
+    dispatch_source_set_event_handler(timer, ^{
+        if (gDateLyricsPauseHideTimer != timer) return;
+        gDateLyricsPauseHideTimer = nil;
+        dispatch_source_cancel(timer);
+
+        if ([gDateLyricsLocalAnchor[@"rate"] floatValue] <= 0.0f &&
+            [gDateLyricsCurrentPayload[@"text"] isKindOfClass:NSString.class]) {
+            gDateLyricsCurrentPayload = nil;
+            gDateLyricsRenderGeneration++;
+            DateLyricsApplyCurrentLineToAllCoverSheets();
+        }
+    });
+    dispatch_resume(timer);
+}
+
 static void DateLyricsScheduleTicker(void) {
     if (gDateLyricsTicker) {
         dispatch_source_cancel(gDateLyricsTicker);
         gDateLyricsTicker = nil;
     }
     
-    if (!gDateLyricsUseLocalTiming || !gDateLyricsEnabled || !gDateLyricsCurrentScore || !gDateLyricsLocalAnchor) {
+    if (!gDateLyricsEnabled || !gDateLyricsCurrentScore || !gDateLyricsLocalAnchor) {
+        DateLyricsCancelPauseHideTimer();
         return;
     }
     
@@ -526,19 +620,25 @@ static void DateLyricsScheduleTicker(void) {
     // only that small backwards correction; a larger backwards move is a real
     // seek and must be reflected immediately.
     NSInteger trackId = [gDateLyricsLocalAnchor[@"trackId"] integerValue];
-    if (trackId != gDateLyricsLastResolvedTrackId) {
+    BOOL isExplicitSeek = [gDateLyricsLocalAnchor[@"seek"] boolValue];
+    BOOL movedBackwardBySeek = NO;
+    BOOL trackChanged = trackId != gDateLyricsLastResolvedTrackId;
+    if (trackChanged) {
         gDateLyricsLastResolvedTrackId = trackId;
         gDateLyricsLastResolvedElapsed = -1.0;
+        gDateLyricsRenderGeneration++;
     }
     if (gDateLyricsLastResolvedElapsed >= 0.0) {
         NSTimeInterval backwards = gDateLyricsLastResolvedElapsed - currentElapsed;
-        if (backwards > 0.0 && backwards < kDateLyricsJitterBackstepLimit) {
+        movedBackwardBySeek = isExplicitSeek && backwards > 0.001;
+        if (backwards > 0.0 && backwards < kDateLyricsJitterBackstepLimit && !isExplicitSeek) {
             DateLyricsDebugLog(@"[Ticker] clamped %.3fs backwards jitter (%.3f -> %.3f)",
                                backwards, gDateLyricsLastResolvedElapsed, currentElapsed);
             currentElapsed = gDateLyricsLastResolvedElapsed;
         }
     }
     gDateLyricsLastResolvedElapsed = currentElapsed;
+    gDateLyricsLastResolutionWasBackwardSeek = movedBackwardBySeek;
     
     NSTimeInterval nextTrigger = -1.0;
     NSDictionary *payload = DateLyricsResolvePayload(gDateLyricsCurrentScore, currentElapsed, &gDateLyricsResolverCursor, &nextTrigger);
@@ -546,9 +646,11 @@ static void DateLyricsScheduleTicker(void) {
     DateLyricsDebugLog(@"[Ticker] elapsed=%.2f text='%@' range=[%@, %@] nextTrigger=%.3f",
                        currentElapsed, payload[@"text"] ?: @"", payload[@"loc"], payload[@"len"], nextTrigger);
     
-    if (![gDateLyricsCurrentPayload isEqual:payload]) {
+    BOOL payloadChanged = ![gDateLyricsCurrentPayload isEqual:payload];
+    if (payloadChanged || trackChanged || movedBackwardBySeek) {
         NSDictionary *previousPayload = gDateLyricsCurrentPayload;
         gDateLyricsCurrentPayload = [payload copy];
+        gDateLyricsRenderGeneration++;
         
         // Haptics logic
         NSString *previousText = previousPayload[@"text"];
@@ -574,9 +676,12 @@ static void DateLyricsScheduleTicker(void) {
     }
     
     if (rate <= 0.0f) {
+        DateLyricsSchedulePauseHideTimer();
         DateLyricsDebugLog(@"[Ticker] paused at %.2f", currentElapsed);
         return;
     }
+
+    DateLyricsCancelPauseHideTimer();
 
     if (nextTrigger >= 0.0) {
         NSTimeInterval delay = MIN((nextTrigger - currentElapsed) / rate, 1.0);
@@ -601,12 +706,16 @@ static BOOL gDateLyricsHapticsEnabled = NO;
 static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot);
 static _UIAnimatingLabel *DateLyricsFindAnimatingLabel(UIView *view);
 static void DateLyricsPrepareAndApplyDateLabel(_UIAnimatingLabel *label);
+static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label);
+static void DateLyricsInvalidateLabelRenderCache(_UIAnimatingLabel *label);
+static BOOL DateLyricsHasRenderableLyricPayload(void);
 static const void *kDateLyricsForcedWidgetDateVisibleKey = &kDateLyricsForcedWidgetDateVisibleKey;
 static const void *kDateLyricsOriginalHiddenKey = &kDateLyricsOriginalHiddenKey;
 static const void *kDateLyricsRestoringStockDateKey = &kDateLyricsRestoringStockDateKey;
 static const void *kDateLyricsLabelShowingLyricKey = &kDateLyricsLabelShowingLyricKey;
 static const void *kDateLyricsLastRenderedAttrTextKey = &kDateLyricsLastRenderedAttrTextKey;
 static const void *kDateLyricsLastRenderedTextKey = &kDateLyricsLastRenderedTextKey;
+static const void *kDateLyricsRenderCacheKey = &kDateLyricsRenderCacheKey;
 static const void *kDateLyricsAnimatingTransitionKey = &kDateLyricsAnimatingTransitionKey;
 static const void *kDateLyricsTransitionGenerationKey = &kDateLyricsTransitionGenerationKey;
 static const void *kDateLyricsOriginalClipsToBoundsKey = &kDateLyricsOriginalClipsToBoundsKey;
@@ -625,6 +734,9 @@ static const void *kDateLyricsIsDateLabelKey = &kDateLyricsIsDateLabelKey;
 // Weak-boxed cache of the label a date view owns, so we stop re-running a
 // recursive subview search on every layout pass.
 static const void *kDateLyricsCachedLabelKey = &kDateLyricsCachedLabelKey;
+// Cached widget host view. Widget containers can lay out many times per second;
+// retain the positive recursive lookup while the host remains in the subtree.
+static const void *kDateLyricsCachedWidgetHostKey = &kDateLyricsCachedWidgetHostKey;
 // Set when a content update arrived mid-transition and must be applied on completion.
 static const void *kDateLyricsPendingApplyKey = &kDateLyricsPendingApplyKey;
 // Cached DateLyricsSplitPlan for the line currently on the label.
@@ -633,11 +745,10 @@ static const void *kDateLyricsSplitPlanKey = &kDateLyricsSplitPlanKey;
 static const void *kDateLyricsSplitWidthKey = &kDateLyricsSplitWidthKey;
 // Frame the label is pinned to for the duration of a line transition.
 static const void *kDateLyricsFrozenFrameKey = &kDateLyricsFrozenFrameKey;
+// Distinguishes our own lyric content writes from SpringBoard's stock date
+// updates. The latter must not replace an active lyric during wake/layout.
+static const void *kDateLyricsApplyingLyricContentKey = &kDateLyricsApplyingLyricContentKey;
 
-static NSString *const kDateLyricsPrefsSuite = @"com.shalamand3r.datelyrics";
-static NSString *const kDateLyricsCurrentLineKey = @"CurrentLyricLine";
-static NSString *const kDateLyricsBridgeFilePath = @"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.current-line.txt";
-static const NSTimeInterval kDateLyricsPayloadFreshnessWindow = 6.0;
 static const NSUInteger kDateLyricsMaxMemoryCacheEntries = 40;
 static const NSUInteger kDateLyricsMaxDiskCacheEntries = 100;
 static NSString *GetLyricsRootPath(void);
@@ -755,14 +866,6 @@ static NSRange DateLyricsRangeFromPayload(NSDictionary *payload, NSString *prefi
 
 
 
-static BOOL DateLyricsPayloadIsFresh(NSDictionary *payload) {
-    if (![payload isKindOfClass:NSDictionary.class]) return NO;
-    NSNumber *emittedAt = payload[@"emittedAt"];
-    if (![emittedAt isKindOfClass:NSNumber.class]) return NO;
-    NSTimeInterval age = [[NSDate date] timeIntervalSince1970] - emittedAt.doubleValue;
-    return age >= -2.0 && age <= kDateLyricsPayloadFreshnessWindow;
-}
-
 static void DateLyricsApplyCurrentLineToAllCoverSheets(void) {
     if (gDateLyricsDateViews) {
         for (CSProminentSubtitleDateView *dateView in gDateLyricsDateViews) {
@@ -797,6 +900,8 @@ static NSDictionary *DateLyricsCurrentRenderablePayload(void) {
 
 static void DateLyricsApplyLabelContent(_UIAnimatingLabel *label, NSString *displayText, NSAttributedString *attrDisplayText) {
     if (![label isKindOfClass:UILabel.class]) return;
+    BOOL wasApplying = [objc_getAssociatedObject(label, kDateLyricsApplyingLyricContentKey) boolValue];
+    objc_setAssociatedObject(label, kDateLyricsApplyingLyricContentKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (attrDisplayText) {
         label.attributedText = attrDisplayText;
     } else {
@@ -809,6 +914,7 @@ static void DateLyricsApplyLabelContent(_UIAnimatingLabel *label, NSString *disp
         [cleanStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, cleanStr.length)];
         label.attributedText = cleanStr;
     }
+    objc_setAssociatedObject(label, kDateLyricsApplyingLyricContentKey, @(wasApplying), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [label setNeedsDisplay];
     [label setNeedsLayout];
 }
@@ -1119,9 +1225,11 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
     // measured width silently produced a different set of segments mid-line, which
     // read as a spurious line change and fired another transition.
     DateLyricsSplitPlan *plan = objc_getAssociatedObject(label, kDateLyricsSplitPlanKey);
+    NSInteger trackId = [gDateLyricsLocalAnchor[@"trackId"] integerValue];
     BOOL planMatches = plan
         && [plan.text isEqualToString:text]
         && [plan.fontKey isEqualToString:fontKey]
+        && plan.trackId == trackId
         && fabs(plan.width - maxWidth) < 0.5
         && (plan.lineId == lineId || [plan.lineId isEqual:lineId]);
 
@@ -1129,6 +1237,7 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
         plan = [DateLyricsSplitPlan new];
         plan.text = text;
         plan.lineId = lineId;
+        plan.trackId = trackId;
         plan.width = maxWidth;
         plan.fontKey = fontKey;
         plan.segments = DateLyricsComputeSegments(text, measureFont, maxWidth);
@@ -1159,13 +1268,19 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
         }
     }
 
-    // Monotonic within a line. Word timing has gaps — at the start of a line, in
-    // instrumental pauses, and after the last word there is no active range at all.
-    // The old code fell back to segment 0 in those moments, so a long line would
-    // animate forward to segment 2, snap back to segment 0, then animate forward
-    // again. Advancing only is the correct reading of a line being sung once
-    // through; the plan resets when lineId changes.
-    if (targetIndex < plan.lastIndex) targetIndex = plan.lastIndex;
+    // Monotonic while playback advances. Word timing has gaps — at the start of
+    // a line, in instrumental pauses, and after the last word there is no active
+    // range at all. The old code fell back to segment 0 in those moments, so a
+    // long line could advance to segment 2, snap back to segment 0, then advance
+    // again. A real backward seek is different: allow its focus range to move
+    // the segment back so the reverse transition is visible. If the seek lands
+    // before the first word, segment 0 is the only unambiguous choice.
+    if (gDateLyricsLastResolutionWasBackwardSeek &&
+        focusRange.location == NSNotFound && focusBackgroundRange.location == NSNotFound) {
+        targetIndex = 0;
+    } else if (!gDateLyricsLastResolutionWasBackwardSeek && targetIndex < plan.lastIndex) {
+        targetIndex = plan.lastIndex;
+    }
     if (targetIndex >= segmentRanges.count) targetIndex = segmentRanges.count - 1;
     plan.lastIndex = targetIndex;
 
@@ -1259,11 +1374,32 @@ static void DateLyricsFinishLabelTransitionAfterDelay(_UIAnimatingLabel *label, 
         // Release the pinned geometry; normal layout resumes on the next pass.
         objc_setAssociatedObject(strongLabel, kDateLyricsFrozenFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
         [strongLabel setNeedsLayout];
-        [strongLabel _amlApplyCurrentLyric];
+        if ([strongLabel respondsToSelector:@selector(_amlApplyCurrentLyric)]) {
+            [strongLabel _amlApplyCurrentLyric];
+        }
     });
 }
 
-static void DateLyricsAnimateLabelTransition(_UIAnimatingLabel *label, NSString *previousDisplayText, NSString *displayText, NSAttributedString *attrDisplayText) {
+// lineId is either a numeric line-start time or "line-start#split-segment".
+// Compare both pieces so scrubbing backwards within a split line also reverses
+// the visual direction.
+static NSComparisonResult DateLyricsCompareLineIdentity(id leftIdentity, id rightIdentity) {
+    NSString *left = [leftIdentity description] ?: @"";
+    NSString *right = [rightIdentity description] ?: @"";
+    NSArray<NSString *> *leftParts = [left componentsSeparatedByString:@"#"];
+    NSArray<NSString *> *rightParts = [right componentsSeparatedByString:@"#"];
+    double leftTime = leftParts.firstObject.doubleValue;
+    double rightTime = rightParts.firstObject.doubleValue;
+    if (fabs(leftTime - rightTime) > 0.0001) {
+        return leftTime < rightTime ? NSOrderedAscending : NSOrderedDescending;
+    }
+    NSInteger leftSegment = leftParts.count > 1 ? leftParts[1].integerValue : 0;
+    NSInteger rightSegment = rightParts.count > 1 ? rightParts[1].integerValue : 0;
+    if (leftSegment == rightSegment) return NSOrderedSame;
+    return leftSegment < rightSegment ? NSOrderedAscending : NSOrderedDescending;
+}
+
+static void DateLyricsAnimateLabelTransition(_UIAnimatingLabel *label, NSString *previousDisplayText, NSString *displayText, NSAttributedString *attrDisplayText, BOOL reverseDirection) {
     if (![label isKindOfClass:UILabel.class]) {
         DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
         return;
@@ -1297,11 +1433,11 @@ static void DateLyricsAnimateLabelTransition(_UIAnimatingLabel *label, NSString 
             transition.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
             transition.type = kCATransitionPush;
             if (gDateLyricsTransitionStyle == DateLyricsTransitionStyleSlideUp) {
-                transition.subtype = kCATransitionFromTop;
+                transition.subtype = reverseDirection ? kCATransitionFromBottom : kCATransitionFromTop;
             } else if (gDateLyricsTransitionStyle == DateLyricsTransitionStylePush) {
-                transition.subtype = kCATransitionFromRight;
+                transition.subtype = reverseDirection ? kCATransitionFromLeft : kCATransitionFromRight;
             } else {
-                transition.subtype = kCATransitionFromBottom;
+                transition.subtype = reverseDirection ? kCATransitionFromTop : kCATransitionFromBottom;
             }
             [label.layer addAnimation:transition forKey:@"DateLyricsLineTransition"];
             // _UIAnimatingLabel animates its own content changes — that is what the
@@ -1324,7 +1460,7 @@ static void DateLyricsAnimateLabelTransition(_UIAnimatingLabel *label, NSString 
                 DateLyricsApplyLabelContent(label, displayText, attrDisplayText);
                 [label layoutIfNeeded];
             }];
-            label.transform = CGAffineTransformMakeScale(0.9, 0.9);
+            label.transform = CGAffineTransformMakeScale(reverseDirection ? 1.1 : 0.9, reverseDirection ? 1.1 : 0.9);
             label.alpha = 0.0;
             [UIView animateWithDuration:duration delay:0.0 usingSpringWithDamping:0.78 initialSpringVelocity:0.4 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
                 label.transform = CGAffineTransformIdentity;
@@ -1348,17 +1484,6 @@ static NSString *DateLyricsHighlightSignature(NSDictionary *payload) {
     NSNumber *bgLen = payload[@"bgLen"];
     if (!loc && !bgLoc) return nil;
     return [NSString stringWithFormat:@"%@:%@:%@:%@", loc ?: @"-", len ?: @"-", bgLoc ?: @"-", bgLen ?: @"-"];
-}
-
-static void DateLyricsSchedulePayloadExpiry(NSDictionary *payload) {
-    NSNumber *emittedAt = payload[@"emittedAt"];
-    if (!emittedAt) return;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((kDateLyricsPayloadFreshnessWindow + 0.2) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([gDateLyricsCurrentPayload[@"emittedAt"] isEqual:emittedAt] && !DateLyricsPayloadIsFresh(gDateLyricsCurrentPayload)) {
-            gDateLyricsCurrentPayload = @{};
-            DateLyricsApplyCurrentLineToAllCoverSheets();
-        }
-    });
 }
 
 static NSString *GetLyricsRootPath(void) {
@@ -1511,6 +1636,31 @@ static NSArray<DateLyricsTimedLine *> *DateLyricsParseWordTimedLines(NSData *dat
     return [delegate.lines copy];
 }
 
+static BOOL DateLyricsWordLinesHaveTiming(NSArray<DateLyricsTimedLine *> *lines) {
+    if (lines.count == 0) return NO;
+    BOOL hasTiming = NO;
+    for (DateLyricsTimedLine *line in lines) {
+        if (!isfinite(line.begin) || !isfinite(line.end)) return NO;
+        for (DateLyricsTimedWord *word in line.words) {
+            if (!isfinite(word.begin) || !isfinite(word.end)) return NO;
+            if (word.end > word.begin) hasTiming = YES;
+        }
+    }
+    return hasTiming;
+}
+
+static BOOL DateLyricsLineItemsHaveTiming(NSArray<MSVLyricsLine *> *lines) {
+    if (lines.count == 0) return NO;
+    BOOL hasTiming = NO;
+    for (MSVLyricsLine *line in lines) {
+        if (!isfinite(line.startTime) || !isfinite(line.endTime)) return NO;
+        if (line.endTime > line.startTime) hasTiming = YES;
+        // Some line-synced responses provide only increasing start times.
+        if (line.startTime > 0.001) hasTiming = YES;
+    }
+    return hasTiming;
+}
+
 static void DateLyricsTouchMemoryCacheLocked(NSNumber *storeID) {
     if (!storeID) return;
     [gLyricsCacheOrder removeObject:storeID];
@@ -1610,16 +1760,60 @@ static void DateLyricsSerializeScore(NSInteger storeID, NSArray<DateLyricsTimedL
     }
 }
 
-static BOOL ParseLyricsData(NSData *data, NSInteger iTunesStoreID, __unused NSInteger lyricsAdamID) {
+static void DateLyricsInvalidateSerializedScore(NSInteger storeID) {
+    if (storeID <= 0) return;
+    NSNumber *storeIDKey = @(storeID);
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    [gLyricsCache removeObjectForKey:storeIDKey];
+    [gWordLyricsCache removeObjectForKey:storeIDKey];
+    [gLyricsCacheOrder removeObject:storeIDKey];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+
+    NSString *path = [GetLyricsRootPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"score-%ld.json", (long)storeID]];
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+        CFSTR("com.shalamand3r.datelyrics/score.changed"), NULL, NULL, YES);
+}
+
+static BOOL DateLyricsXMLDeclaresNoTiming(NSData *data) {
+    if (!data.length) return NO;
+
+    NSString *xml = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (xml.length == 0) return NO;
+
+    // Apple marks transcript-only TTML explicitly.  Check the document before
+    // invoking either parser because the private parser still returns one line
+    // per <p>, all at time zero, for this format.
+    NSRange doubleQuoted = [xml rangeOfString:@"itunes:timing=\"None\"" options:NSCaseInsensitiveSearch];
+    if (doubleQuoted.location != NSNotFound) return YES;
+    NSRange singleQuoted = [xml rangeOfString:@"itunes:timing='None'" options:NSCaseInsensitiveSearch];
+    return singleQuoted.location != NSNotFound;
+}
+
+static BOOL ParseLyricsData(NSData *data, NSInteger iTunesStoreID, __unused NSInteger lyricsAdamID, BOOL *unsynchronizedOut) {
+    if (unsynchronizedOut) *unsynchronizedOut = NO;
     if (!data.length || iTunesStoreID <= 0) return NO;
+
+    if (DateLyricsXMLDeclaresNoTiming(data)) {
+        if (unsynchronizedOut) *unsynchronizedOut = YES;
+        DateLyricsInvalidateSerializedScore(iTunesStoreID);
+        DateLyricsDebugLog(@"[Parser] Ignoring TTML transcript marked itunes:timing=None for storeID=%ld", (long)iTunesStoreID);
+        return NO;
+    }
 
     pthread_mutex_lock(&gLyricsCacheMutex);
     NSNumber *storeIDKey = @(iTunesStoreID);
-    if ([gLyricsCache[storeIDKey] count] > 0 || [gWordLyricsCache[storeIDKey] count] > 0) {
+    NSArray *cachedLineItems = gLyricsCache[storeIDKey];
+    NSArray *cachedWordLines = gWordLyricsCache[storeIDKey];
+    BOOL cachedLineTiming = DateLyricsLineItemsHaveTiming(cachedLineItems);
+    BOOL cachedWordTiming = DateLyricsWordLinesHaveTiming(cachedWordLines);
+    if ((cachedLineItems.count > 0 && cachedLineTiming) || (cachedWordLines.count > 0 && cachedWordTiming)) {
         DateLyricsTouchMemoryCacheLocked(storeIDKey);
         pthread_mutex_unlock(&gLyricsCacheMutex);
         return YES;
     }
+    [gLyricsCache removeObjectForKey:storeIDKey];
+    [gWordLyricsCache removeObjectForKey:storeIDKey];
     pthread_mutex_unlock(&gLyricsCacheMutex);
 
     NSArray<DateLyricsTimedLine *> *wordLines = DateLyricsParseWordTimedLines(data);
@@ -1642,7 +1836,19 @@ static BOOL ParseLyricsData(NSData *data, NSInteger iTunesStoreID, __unused NSIn
             return NSOrderedSame;
         }
     }];
-    if (lyricLines.count == 0 && wordLines.count == 0) return NO;
+
+    // A plain transcript has text but no timeline. Treat it as no lyrics for
+    // DateLyrics purposes; displaying it would make one arbitrary line occupy
+    // the date view for the entire song. Prefer word timing when available, or
+    // otherwise valid line timing from Apple's parser.
+    if (!DateLyricsWordLinesHaveTiming(wordLines)) wordLines = nil;
+    if (!DateLyricsLineItemsHaveTiming(lyricLines)) lyricLines = nil;
+    if (lyricLines.count == 0 && wordLines.count == 0) {
+        if (unsynchronizedOut) *unsynchronizedOut = YES;
+        DateLyricsInvalidateSerializedScore(iTunesStoreID);
+        DateLyricsDebugLog(@"[Parser] Ignoring unsynchronized lyrics for storeID=%ld", (long)iTunesStoreID);
+        return NO;
+    }
 
     pthread_mutex_lock(&gLyricsCacheMutex);
     if (lyricLines.count > 0) {
@@ -1725,14 +1931,20 @@ static void ProcessNextTask(void) {
                     taskFailed = YES;
                 } else {
                     NSData *data = [(NSString *)object dataUsingEncoding:NSUTF8StringEncoding];
-                    if (data.length && ParseLyricsData(data, task.iTunesStoreID, task.lyricsAdamID)) {
+                    BOOL unsynchronized = NO;
+                    if (data.length && ParseLyricsData(data, task.iTunesStoreID, task.lyricsAdamID, &unsynchronized)) {
+                        DateLyricsSetUnsynchronizedLyricsID(task.lyricsAdamID, NO);
                         if (![data writeToFile:task.lyricsFilePath atomically:YES]) {
                             taskFailed = YES;
                         } else {
                             DateLyricsPruneDiskCache();
                         }
                     } else {
-                        taskFailed = YES;
+                        taskFailed = !unsynchronized;
+                        if (unsynchronized) {
+                            DateLyricsSetUnsynchronizedLyricsID(task.lyricsAdamID, YES);
+                            DateLyricsDebugLog(@"[Parser] Marked lyricsAdamID=%ld as transcript-only; skipping retries", (long)task.lyricsAdamID);
+                        }
                         [[NSFileManager defaultManager] removeItemAtPath:task.lyricsFilePath error:nil];
                     }
                 }
@@ -1789,20 +2001,23 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 %hook ICURLSession
 
 - (void)enqueueDataRequest:(id)arg1 withCompletionHandler:(ICURLSessionCompletionHandler)arg2 {
-    if (!gSession) {
-        gSession = self;
+    // Music can replace its URL session or refresh the request context after a
+    // token/identity change.  Keeping the first objects forever makes all later
+    // lyric requests fail after that rotation.
+    ICURLSession *session = nil;
+    ICMusicKitRequestContext *requestContext = nil;
+    if ([arg1 isKindOfClass:%c(ICMusicKitURLRequest)]) {
+        ICMusicKitURLRequest *req = arg1;
+        session = self;
+        requestContext = [req requestContext];
     }
-    if (!gRequestContext) {
-        if ([arg1 isKindOfClass:%c(ICMusicKitURLRequest)]) {
-            ICMusicKitURLRequest *req = arg1;
-            gRequestContext = [req requestContext];
+    dispatch_async(gLyricsQueue, ^{
+        if (session) {
+            gSession = session;
+            gRequestContext = requestContext;
         }
-    }
-    if (gSession && gRequestContext) {
-        dispatch_async(gLyricsQueue, ^{
-            if (!gIsProcessingQueue) ProcessNextTask();
-        });
-    }
+        if (!gIsProcessingQueue) ProcessNextTask();
+    });
     %orig;
 }
 
@@ -1816,9 +2031,16 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
     dispatch_async(gLyricsQueue, ^{
         
         MRContentItem *item = self.nowPlayingContentItem;
+        if (!item || ![item respondsToSelector:@selector(metadata)] || !item.metadata) {
+            return;
+        }
         NSInteger iTunesStoreID = item.metadata.iTunesStoreIdentifier;
 
         if (!item.metadata.lyricsAvailable) {
+            // A track can lose its lyrics flag while switching items.  Remove
+            // any score left from an earlier fetch so SpringBoard cannot load
+            // it when the new anchor arrives.
+            if (iTunesStoreID > 0) DateLyricsInvalidateSerializedScore(iTunesStoreID);
             return;
         }
 
@@ -1844,13 +2066,22 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
         
         NSString *lyricsRoot = GetLyricsRootPath();
         NSString *lyricsFilePath = [lyricsRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"syllable-lyrics_%lld.xml", (long long)lyricsAdamID]];
+        if (DateLyricsIsUnsynchronizedLyricsID(lyricsAdamID)) {
+            return;
+        }
         BOOL lyricsCacheExists = [[NSFileManager defaultManager] fileExistsAtPath:lyricsFilePath];
         if (lyricsCacheExists) {
             NSData *cachedData = [NSData dataWithContentsOfFile:lyricsFilePath];
-            if (ParseLyricsData(cachedData, iTunesStoreID, lyricsAdamID)) {
+            BOOL unsynchronized = NO;
+            if (ParseLyricsData(cachedData, iTunesStoreID, lyricsAdamID, &unsynchronized)) {
                 return;
             }
             [[NSFileManager defaultManager] removeItemAtPath:lyricsFilePath error:nil];
+            if (unsynchronized) {
+                DateLyricsSetUnsynchronizedLyricsID(lyricsAdamID, YES);
+                DateLyricsDebugLog(@"[Parser] Marked cached lyricsAdamID=%ld as transcript-only; skipping fetch", (long)lyricsAdamID);
+                return;
+            }
         }
 
         NSURL *lyricURL = [NSURL URLWithString:lyricURLString];
@@ -1860,24 +2091,11 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
 %end
 
-%hook MPNowPlayingInfoCenter
-
-- (MPNowPlayingContentItem *)nowPlayingContentItem {
-    if (!gNowPlayingInfoCenter) {
-        gNowPlayingInfoCenter = self;
-    }
-    return %orig;
-}
-
-%end
-
 %hook MPNowPlayingContentItem
 
 %property (nonatomic, strong) NSNumber *amlPlaybackRate;
 %property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
 %property (nonatomic, strong) NSNumber *amlLastSystemTime;
-%property (nonatomic, strong) NSNumber *amlLastResolvedElapsed;
-%property (nonatomic, strong) NSNumber *amlLastResolvedLineIndex;
 %property (assign, nonatomic) NSInteger amlLastStoreID;
 
 - (void)dealloc {
@@ -1910,7 +2128,7 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 }
 
 
-static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float rate) {
+static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float rate, BOOL isSeek) {
     if (storeID <= 0) return;
     NSMutableDictionary *anchor = [NSMutableDictionary dictionary];
     anchor[@"protocol"] = @3;
@@ -1918,6 +2136,7 @@ static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float
     anchor[@"trackId"] = @(storeID);
     anchor[@"elapsed"] = @(elapsedTime);
     anchor[@"rate"] = @(rate);
+    anchor[@"seek"] = @(isSeek);
     anchor[@"atHostTime"] = @(DateLyricsMonotonicTime());
     static NSInteger revision = 0;
     anchor[@"revision"] = @(++revision);
@@ -1978,17 +2197,25 @@ static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float
     
     double nowHost = DateLyricsMonotonicTime();
     double expectedElapsed = lastAnchorElapsed + ((nowHost - lastAnchorHostTime) * lastAnchorRate);
+    BOOL pausedPositionChanged = sanitizedRate <= 0.0f && lastAnchorElapsed >= 0.0 &&
+        ABS(elapsedTime - lastAnchorElapsed) > 0.05;
     BOOL seeked = lastAnchorHostTime >= 0.0 && ABS(elapsedTime - expectedElapsed) > 0.35;
+    // A paused scrub is not clock jitter.  Mark a meaningful backward move as
+    // an explicit seek so SpringBoard is allowed to resolve in reverse even
+    // when the distance is smaller than the normal playing seek threshold.
+    if (sanitizedRate <= 0.0f && lastAnchorElapsed >= 0.0 && elapsedTime < lastAnchorElapsed - 0.05) {
+        seeked = YES;
+    }
     // Darwin notifications are lossy. A light periodic anchor makes the direct
     // bridge self-healing without restoring the old per-lyric heartbeat.
     BOOL refreshDue = lastAnchorHostTime < 0.0 || nowHost - lastAnchorHostTime >= 4.0;
     
-    if (rateChanged || trackChanged || seeked || refreshDue) {
+    if (rateChanged || trackChanged || seeked || pausedPositionChanged || refreshDue) {
         lastAnchorElapsed = elapsedTime;
         lastAnchorHostTime = nowHost;
         lastAnchorRate = sanitizedRate;
         self.amlLastStoreID = storeID;
-        DateLyricsPublishAnchor(storeID, elapsedTime, sanitizedRate);
+        DateLyricsPublishAnchor(storeID, elapsedTime, sanitizedRate, seeked);
     }
 }
 
@@ -2038,16 +2265,35 @@ static _UIAnimatingLabel *DateLyricsFindAnimatingLabel(UIView *view) {
     return label;
 }
 
-static BOOL DateLyricsViewContainsClassNamed(UIView *view, NSString *className) {
-    if (![view isKindOfClass:UIView.class] || className.length == 0) return NO;
-    if ([NSStringFromClass(view.class) isEqualToString:className]) return YES;
+static UIView *DateLyricsFindWidgetHostView(UIView *view) {
+    if (![view isKindOfClass:UIView.class]) return nil;
 
-    for (UIView *subview in view.subviews) {
-        if (DateLyricsViewContainsClassNamed(subview, className)) {
-            return YES;
+    DateLyricsWeakBox *box = objc_getAssociatedObject(view, kDateLyricsCachedWidgetHostKey);
+    UIView *cached = box.object;
+    if ([cached isKindOfClass:UIView.class] && (cached == view || [cached isDescendantOfView:view])) {
+        return cached;
+    }
+
+    UIView *host = nil;
+    if ([NSStringFromClass(view.class) isEqualToString:@"CHUISWidgetHostViewControllerView"]) {
+        host = view;
+    } else {
+        for (UIView *subview in view.subviews) {
+            host = DateLyricsFindWidgetHostView(subview);
+            if (host) break;
         }
     }
-    return NO;
+
+    if (host) {
+        if (!box) {
+            box = [DateLyricsWeakBox new];
+            objc_setAssociatedObject(view, kDateLyricsCachedWidgetHostKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        box.object = host;
+    } else {
+        objc_setAssociatedObject(view, kDateLyricsCachedWidgetHostKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    return host;
 }
 
 static CSProminentSubtitleDateView *DateLyricsFindSiblingDateView(UIView *view) {
@@ -2099,7 +2345,7 @@ static UIView *DateLyricsFindMatchingWidgetSlotForDateView(UIView *dateView) {
     Class emptyElementClass = NSClassFromString(@"CSProminentEmptyElementView");
     for (UIView *subview in containerView.subviews) {
         if (![subview isKindOfClass:emptyElementClass]) continue;
-        if (!DateLyricsViewContainsClassNamed(subview, @"CHUISWidgetHostViewControllerView")) continue;
+        if (!DateLyricsFindWidgetHostView(subview)) continue;
         if (!DateLyricsWidgetSlotMatchesDateSlot(subview, dateView)) continue;
         return subview;
     }
@@ -2112,7 +2358,7 @@ static void DateLyricsSetWidgetDateSlotHidden(UIView *containerView, UIView *dat
     Class emptyElementClass = NSClassFromString(@"CSProminentEmptyElementView");
     for (UIView *subview in containerView.subviews) {
         if (![subview isKindOfClass:emptyElementClass]) continue;
-        if (!DateLyricsViewContainsClassNamed(subview, @"CHUISWidgetHostViewControllerView")) continue;
+        if (!DateLyricsFindWidgetHostView(subview)) continue;
         BOOL matchesDateSlot = DateLyricsWidgetSlotMatchesDateSlot(subview, dateView);
         if (hidden && !matchesDateSlot) continue;
         if (!hidden && !matchesDateSlot && !objc_getAssociatedObject(subview, kDateLyricsOriginalHiddenKey)) continue;
@@ -2121,19 +2367,38 @@ static void DateLyricsSetWidgetDateSlotHidden(UIView *containerView, UIView *dat
             if (!objc_getAssociatedObject(subview, kDateLyricsOriginalHiddenKey)) {
                 objc_setAssociatedObject(subview, kDateLyricsOriginalHiddenKey, @(subview.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             }
-            subview.hidden = YES;
+            if (!subview.hidden) subview.hidden = YES;
         } else {
             NSNumber *originalHidden = objc_getAssociatedObject(subview, kDateLyricsOriginalHiddenKey);
             if (originalHidden) {
-                subview.hidden = originalHidden.boolValue;
+                BOOL shouldHide = originalHidden.boolValue;
+                if (subview.hidden != shouldHide) subview.hidden = shouldHide;
                 objc_setAssociatedObject(subview, kDateLyricsOriginalHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
             }
         }
     }
 }
 
+static BOOL DateLyricsShouldSuppressStockDate(void) {
+    if (!gDateLyricsEnabled || !gDateLyricsCurrentScore || !gDateLyricsLocalAnchor) return NO;
+    if ([gDateLyricsLocalAnchor[@"rate"] floatValue] <= 0.0f) return NO;
+    return DateLyricsHasRenderableLyricPayload();
+}
+
+static BOOL DateLyricsHasRenderableLyricPayload(void) {
+    if (!gDateLyricsEnabled) return NO;
+    NSString *text = gDateLyricsCurrentPayload[@"text"];
+    return [text isKindOfClass:NSString.class] && text.length > 0;
+}
+
+static void DateLyricsInvalidateLabelRenderCache(_UIAnimatingLabel *label) {
+    if (![label isKindOfClass:UILabel.class]) return;
+    objc_setAssociatedObject(label, kDateLyricsRenderCacheKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
 static void DateLyricsPrepareAndApplyDateLabel(_UIAnimatingLabel *label) {
     if (!label) return;
+    DateLyricsInvalidateLabelRenderCache(label);
     [label _amlApplyCurrentLyric];
 }
 
@@ -2167,6 +2432,7 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     objc_setAssociatedObject(label, kDateLyricsLabelShowingLyricKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsLastRenderedAttrTextKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsLastRenderedTextKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    DateLyricsInvalidateLabelRenderCache(label);
     objc_setAssociatedObject(label, @selector(_amlApplyCurrentLyric), nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, @selector(previousLineId), nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(label, kDateLyricsAnimatingTransitionKey, nil, OBJC_ASSOCIATION_ASSIGN);
@@ -2259,7 +2525,7 @@ static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
 
 static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     if (![widgetSlot isKindOfClass:UIView.class]) return;
-    if (!DateLyricsViewContainsClassNamed(widgetSlot, @"CHUISWidgetHostViewControllerView")) return;
+    if (!DateLyricsFindWidgetHostView(widgetSlot)) return;
 
     CSProminentSubtitleDateView *dateView = DateLyricsFindSiblingDateView(widgetSlot);
     if (!dateView) return;
@@ -2282,14 +2548,17 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         return;
     }
 
-    if (!objc_getAssociatedObject(dateView, kDateLyricsOriginalHiddenKey)) {
+    BOOL wasForced = [objc_getAssociatedObject(dateView, kDateLyricsForcedWidgetDateVisibleKey) boolValue];
+    if (!wasForced && !objc_getAssociatedObject(dateView, kDateLyricsOriginalHiddenKey)) {
         objc_setAssociatedObject(dateView, kDateLyricsOriginalHiddenKey, @(dateView.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    dateView.hidden = NO;
+    if (dateView.hidden) dateView.hidden = NO;
     DateLyricsSetWidgetDateSlotHidden(widgetSlot.superview, dateView, YES);
     objc_setAssociatedObject(dateView, kDateLyricsForcedWidgetDateVisibleKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    DateLyricsPrepareAndApplyDateLabel(DateLyricsFindAnimatingLabel(dateView));
-    [dateView setNeedsLayout];
+    if (!wasForced) {
+        DateLyricsPrepareAndApplyDateLabel(DateLyricsFindAnimatingLabel(dateView));
+        [dateView setNeedsLayout];
+    }
 }
 
 %hook CSProminentSubtitleDateView
@@ -2313,6 +2582,7 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     NSDictionary *payload = DateLyricsCurrentRenderablePayload();
     NSString *lyric = payload[@"text"];
     if (lyric.length > 0 && gDateLyricsEnabled) {
+        label.hidden = NO;
         // While a transition runs, hold the label at the frame captured when it
         // started. UIKit will otherwise re-size the label to its new (shorter or
         // longer) text mid-animation, which is what tears the outgoing and
@@ -2336,6 +2606,9 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         [label _amlApplyCurrentLyric];
     } else {
         DateLyricsRestoreSystemDateLabel(label);
+        if (!DateLyricsShouldSuppressStockDate()) {
+            label.hidden = NO;
+        }
     }
 }
 
@@ -2379,6 +2652,12 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         %orig;
         return;
     }
+    if (![objc_getAssociatedObject(self, kDateLyricsApplyingLyricContentKey) boolValue] &&
+        [objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue] &&
+        DateLyricsHasRenderableLyricPayload()) {
+        return;
+    }
+    DateLyricsInvalidateLabelRenderCache(self);
     if (text.length > 0 && ![objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue]) {
         // Routed through attributedText purely to clear any inherited stroke width.
         // %orig is intentionally skipped: setting attributedText supersedes it, and
@@ -2398,6 +2677,12 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         %orig;
         return;
     }
+    if (![objc_getAssociatedObject(self, kDateLyricsApplyingLyricContentKey) boolValue] &&
+        [objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue] &&
+        DateLyricsHasRenderableLyricPayload()) {
+        return;
+    }
+    DateLyricsInvalidateLabelRenderCache(self);
     if (attributedText.length > 0 && ![objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue]) {
         NSMutableAttributedString *cleanStr = [attributedText mutableCopy];
         [cleanStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, cleanStr.length)];
@@ -2415,7 +2700,28 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         DateLyricsRestoreSystemDateLabel(self);
         return;
     }
-    NSDictionary *payload = DateLyricsCurrentRenderablePayload();
+    NSDictionary *sourcePayload = DateLyricsCurrentRenderablePayload();
+    NSDictionary *payload = sourcePayload;
+    NSString *sourceLyric = payload[@"text"];
+    if (sourceLyric.length == 0) {
+        DateLyricsRestoreSystemDateLabel(self);
+        return;
+    }
+
+    UIFont *configuredFont = DateLyricsConfiguredFontForLabel(self);
+    BOOL isShowingLyric = [objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue];
+    NSDictionary *renderCache = objc_getAssociatedObject(self, kDateLyricsRenderCacheKey);
+    UIFont *cachedFont = renderCache[@"font"];
+    UITraitCollection *cachedTraits = renderCache[@"traits"];
+    NSString *cachedDisplayText = renderCache[@"displayText"];
+    NSString *currentLabelText = self.attributedText.string ?: self.text ?: @"";
+    BOOL labelMatchesCache = [cachedDisplayText isKindOfClass:NSString.class] && [currentLabelText isEqualToString:cachedDisplayText];
+    BOOL cacheMatches = isShowingLyric && renderCache[@"payload"] == sourcePayload &&
+        [renderCache[@"generation"] unsignedIntegerValue] == gDateLyricsRenderGeneration &&
+        fabs([renderCache[@"width"] doubleValue] - CGRectGetWidth(self.bounds)) < 0.5 &&
+        [cachedFont isEqual:configuredFont] && [cachedTraits isEqual:self.traitCollection] && labelMatchesCache;
+    if (cacheMatches) return;
+
     if (payload && !gDateLyricsShowAdlibs) {
         NSString *rawText = payload[@"text"];
         NSString *strippedText = DateLyricsStripParentheses(rawText) ?: @"";
@@ -2448,7 +2754,6 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
             payload = [mutablePayload copy];
         }
     }
-    UIFont *configuredFont = DateLyricsConfiguredFontForLabel(self);
     NSDictionary *renderPayload = DateLyricsSplitPayloadForLabel(payload, self, configuredFont) ?: payload;
     NSString *lyric = renderPayload[@"text"];
     
@@ -2479,7 +2784,6 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
             textColor = [textColor resolvedColorWithTraitCollection:self.traitCollection];
         }
         [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
-        [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
 
         NSUInteger loc = locNum ? locNum.unsignedIntegerValue : NSNotFound;
         NSUInteger len = lenNum ? lenNum.unsignedIntegerValue : 0;
@@ -2498,85 +2802,27 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
             }
         }
 
-        if (gDateLyricsHighlightStyle == 1) {
-            NSMutableArray<NSValue *> *ranges = [NSMutableArray array];
+        // Opacity is the sole highlight style: dim upcoming syllables and retain
+        // the normal colour for the spoken portion of the line.
+        UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+        BOOL finished = [renderPayload[@"finished"] boolValue];
+        BOOL started = renderPayload[@"started"] ? [renderPayload[@"started"] boolValue] : YES;
+        if (finished) {
+            [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
+        } else if (!started) {
+            [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
+        } else {
+            [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
             if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
-                [ranges addObject:[NSValue valueWithRange:highlightRange]];
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
             }
             if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
-                [ranges addObject:[NSValue valueWithRange:backgroundHighlightRange]];
-            }
-            if (ranges.count > 0) {
-                [ranges sortUsingComparator:^NSComparisonResult(NSValue *a, NSValue *b) {
-                    NSRange left = a.rangeValue;
-                    NSRange right = b.rangeValue;
-                    if (left.location > right.location) return NSOrderedAscending;
-                    if (left.location < right.location) return NSOrderedDescending;
-                    return NSOrderedSame;
-                }];
-                for (NSValue *value in ranges) {
-                    NSRange range = value.rangeValue;
-                    if (NSMaxRange(range) > mAttrStr.length) continue;
-                    NSString *syllable = [lyric substringWithRange:range];
-                    NSString *upper = [syllable uppercaseStringWithLocale:[NSLocale currentLocale]];
-                    // Uppercasing is not always length-preserving (ß -> SS, and some
-                    // locale-specific forms). A longer replacement would shift every
-                    // range recorded against this string, so skip rather than corrupt.
-                    if (upper.length != syllable.length) continue;
-                    [mAttrStr replaceCharactersInRange:range withString:upper];
-                }
-                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, mAttrStr.length)];
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, mAttrStr.length)];
-                attrDisplayText = mAttrStr;
-            }
-        } else if (gDateLyricsHighlightStyle == 2) {
-            UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
-
-            BOOL finished = [renderPayload[@"finished"] boolValue];
-            BOOL started = renderPayload[@"started"] ? [renderPayload[@"started"] boolValue] : YES;
-
-            [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
-
-            if (finished) {
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
-            } else if (!started) {
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
-            } else {
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
-                if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
-                    [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:highlightRange];
-                }
-                if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
-                    [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:backgroundHighlightRange];
-                }
-            }
-            attrDisplayText = mAttrStr;
-        } else {  
-            // Stroke style
-            if ((highlightRange.location != NSNotFound && highlightRange.length > 0) ||
-                (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0)) {
-                
-                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
-                
-                if (highlightRange.location != NSNotFound && highlightRange.length > 0) {
-                    [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@(-gDateLyricsStrokeWidth) range:highlightRange];
-                    [mAttrStr addAttribute:NSStrokeColorAttributeName value:textColor range:highlightRange];
-                }
-                if (backgroundHighlightRange.location != NSNotFound && backgroundHighlightRange.length > 0) {
-                    [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@(-gDateLyricsStrokeWidth) range:backgroundHighlightRange];
-                    [mAttrStr addAttribute:NSStrokeColorAttributeName value:textColor range:backgroundHighlightRange];
-                }
-                attrDisplayText = mAttrStr;
-            } else if (isTimed) {
-                [mAttrStr addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, lyric.length)];
-                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
-                attrDisplayText = mAttrStr;
+                [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:backgroundHighlightRange];
             }
         }
+        attrDisplayText = mAttrStr;
     }
 
-    BOOL isShowingLyric = [objc_getAssociatedObject(self, kDateLyricsLabelShowingLyricKey) boolValue];
     if (!isShowingLyric) {
         if (self.font) {
             objc_setAssociatedObject(self, kDateLyricsOriginalFontKey, self.font, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -2624,9 +2870,11 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
     id currentLineId = renderPayload[@"lineId"];
     id previousLineId = objc_getAssociatedObject(self, @selector(previousLineId));
+    BOOL reverseDirection = NO;
     if (currentLineId && previousLineId) {
         if (![currentLineId isEqual:previousLineId]) {
             lineChanged = YES;
+            reverseDirection = DateLyricsCompareLineIdentity(currentLineId, previousLineId) == NSOrderedAscending;
         }
     }
 
@@ -2648,11 +2896,11 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     // its final position instead of displaying transient intermediate lines.
     // Bookkeeping is deliberately not committed here, so previousDisplayText still
     // describes what is actually on screen.
-    DateLyricsDebugLog(@"APPLY split=%d w=%.1f frame=%.1f contentChg=%d lineChg=%d trans=%d loc=%@ len=%@ id=%@ prevId=%@ text='%@' prev='%@'",
+    DateLyricsDebugLog(@"APPLY split=%d w=%.1f frame=%.1f contentChg=%d lineChg=%d reverse=%d trans=%d loc=%@ len=%@ id=%@ prevId=%@ text='%@' prev='%@'",
                        [renderPayload[@"splitApplied"] boolValue],
                        CGRectGetWidth(self.bounds),
                        CGRectGetWidth(self.frame),
-                       contentChanged, lineChanged, isTransitioning,
+                       contentChanged, lineChanged, reverseDirection, isTransitioning,
                        renderPayload[@"loc"] ?: @"-", renderPayload[@"len"] ?: @"-",
                        currentLineId ?: @"-", previousLineId ?: @"-",
                        displayText, previousDisplayText ?: @"-");
@@ -2680,11 +2928,20 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
         }
 
         if (lineChanged) {
-            DateLyricsAnimateLabelTransition(self, previousDisplayText ?: @"", displayText, attrDisplayText);
+            DateLyricsAnimateLabelTransition(self, previousDisplayText ?: @"", displayText, attrDisplayText, reverseDirection);
         } else {
             DateLyricsApplyLabelContent(self, displayText, attrDisplayText);
         }
     }
+
+    objc_setAssociatedObject(self, kDateLyricsRenderCacheKey, @{
+        @"generation": @(gDateLyricsRenderGeneration),
+        @"payload": sourcePayload,
+        @"displayText": displayText,
+        @"width": @(CGRectGetWidth(self.bounds)),
+        @"font": configuredFont,
+        @"traits": self.traitCollection ?: [NSNull null]
+    }, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 %end
@@ -2751,8 +3008,6 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
         gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
         gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
-        gDateLyricsHighlightStyle = getPrefInteger(@"HighlightStyle", 2);
-        gDateLyricsHighlightTrail = getPrefBool(@"HighlightTrail", YES);
         gDateLyricsHapticsEnabled = getPrefBool(@"HapticsEnabled", NO);
         gDateLyricsHapticStyleSyllable = getPrefInteger(@"HapticStyleSyllable", 1);
         gDateLyricsHapticStyleLine = getPrefInteger(@"HapticStyleLine", 2);
@@ -2766,7 +3021,6 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         }
         gDateLyricsTransitionStyle = transitionStyle;
         gDateLyricsTransitionDuration = getPrefDouble(@"TransitionDuration", 0.3);
-        gDateLyricsStrokeWidth = getPrefFloat(@"StrokeWidth", 3.0);
         gDateLyricsSplitLongLines = getPrefBool(@"SplitLongLines", YES);
         if (gDateLyricsSplitLongLines) {
             gDateLyricsShowAdlibs = NO;
@@ -2775,8 +3029,13 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         }
         gDateLyricsMinimumScale = getPrefFloat(@"MinimumScale", 0.55);
         gDateLyricsPauseTimeout = getPrefDouble(@"PauseTimeout", 2.0);
-        gDateLyricsLineHoldDuration = getPrefDouble(@"LineHoldDuration", 2.0);
+        gDateLyricsDebugLogging = getPrefBool(@"DebugLogging", NO);
+        gDateLyricsRenderGeneration++;
 
+        if (DateLyricsIsSpringBoardHost()) {
+            DateLyricsCancelPauseHideTimer();
+            DateLyricsScheduleTicker();
+        }
         if (!gDateLyricsEnabled) {
             if (DateLyricsIsSpringBoardHost()) {
                 gDateLyricsCurrentPayload = nil;
@@ -2804,6 +3063,7 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
     [gLyricsCache removeAllObjects];
     [gWordLyricsCache removeAllObjects];
     [gLyricsCacheOrder removeAllObjects];
+    [gUnsynchronizedLyricsIDs removeAllObjects];
     pthread_mutex_unlock(&gLyricsCacheMutex);
 
     NSString *rootPath = GetLyricsRootPath();
@@ -2815,6 +3075,7 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
 
     if (DateLyricsIsSpringBoardHost()) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            DateLyricsCancelPauseHideTimer();
             gDateLyricsCurrentPayload = @{};
             DateLyricsApplyCurrentLineToAllCoverSheets();
         });
@@ -2827,7 +3088,7 @@ static void DateLyricsHandleAnchorChanged(CFNotificationCenterRef center, void *
     // cursor and dispatch source are all main-thread state, so serialise the
     // complete consume-and-render step here instead of racing a ticker callback.
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!gDateLyricsEnabled || !gDateLyricsUseLocalTiming) return;
+        if (!gDateLyricsEnabled) return;
 
         NSString *path = [GetLyricsRootPath() stringByAppendingPathComponent:@"anchor.json"];
         NSData *data = [NSData dataWithContentsOfFile:path];
@@ -2862,7 +3123,7 @@ static void DateLyricsHandleAnchorChanged(CFNotificationCenterRef center, void *
 
 static void DateLyricsHandleScoreChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!gDateLyricsEnabled || !gDateLyricsUseLocalTiming || !gDateLyricsLocalAnchor) return;
+        if (!gDateLyricsEnabled || !gDateLyricsLocalAnchor) return;
 
         NSInteger currentTrackId = [gDateLyricsLocalAnchor[@"trackId"] integerValue];
         NSString *scorePath = [GetLyricsRootPath() stringByAppendingPathComponent:[NSString stringWithFormat:@"score-%ld.json", (long)currentTrackId]];
@@ -2871,8 +3132,28 @@ static void DateLyricsHandleScoreChanged(CFNotificationCenterRef center, void *o
         if (newScore && newScore.trackId == currentTrackId) {
             gDateLyricsCurrentScore = newScore;
             gDateLyricsResolverCursor = -1;
+            gDateLyricsLastResolvedTrackId = currentTrackId;
+            gDateLyricsLastResolvedElapsed = -1.0;
+            gDateLyricsRenderGeneration++;
             DateLyricsDebugLog(@"[SB] Score updated for trackId=%ld (lines=%lu)", (long)currentTrackId, (unsigned long)newScore.lines.count);
             DateLyricsScheduleTicker();
+        } else {
+            // Music intentionally removed an invalid/unsynchronised score (or
+            // the file was malformed).  Do not leave the previous song's
+            // payload alive in SpringBoard; otherwise a transcript-only track
+            // can appear to have lyrics until the next anchor arrives.
+            BOOL hadScore = (gDateLyricsCurrentScore != nil || gDateLyricsCurrentPayload != nil);
+            gDateLyricsCurrentScore = nil;
+            gDateLyricsCurrentPayload = nil;
+            gDateLyricsResolverCursor = -1;
+            gDateLyricsLastResolvedTrackId = currentTrackId;
+            gDateLyricsLastResolvedElapsed = -1.0;
+            gDateLyricsRenderGeneration++;
+            DateLyricsScheduleTicker();
+            if (hadScore) {
+                DateLyricsDebugLog(@"[SB] Cleared score for trackId=%ld (missing or invalid)", (long)currentTrackId);
+                DateLyricsApplyCurrentLineToAllCoverSheets();
+            }
         }
     });
 }
@@ -2883,7 +3164,7 @@ static void DateLyricsHandleAnchorRequest(CFNotificationCenterRef center, void *
         if (storeID) {
             double elapsedTime = [gCurrentContentItem calculatedElapsedTime];
             float rate = gCurrentContentItem.amlPlaybackRate ? gCurrentContentItem.amlPlaybackRate.floatValue : 0.0f;
-            DateLyricsPublishAnchor(storeID, elapsedTime, rate);
+            DateLyricsPublishAnchor(storeID, elapsedTime, rate, NO);
         }
     }
 }
@@ -2894,6 +3175,7 @@ static void DateLyricsHandleAnchorRequest(CFNotificationCenterRef center, void *
         gLyricsCache = [[NSMutableDictionary alloc] init];
         gWordLyricsCache = [[NSMutableDictionary alloc] init];
         gLyricsCacheOrder = [NSMutableArray array];
+        gUnsynchronizedLyricsIDs = [NSMutableSet set];
         gLyricsQueue = dispatch_queue_create("com.shalamand3r.datelyrics.queue", DISPATCH_QUEUE_SERIAL);
         gLyricsTaskQueue = [NSMutableArray array];
         gPendingLyricsIDs = [NSMutableSet set];
@@ -2920,7 +3202,6 @@ static void DateLyricsHandleAnchorRequest(CFNotificationCenterRef center, void *
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFSTR("com.shalamand3r.datelyrics/anchor.request"), NULL, NULL, YES);
 
         %init(DateLyricsSpringBoard);
-        DateLyricsSchedulePayloadExpiry(gDateLyricsCurrentPayload);
     } else if (DateLyricsIsMusicHost()) {
         dlopen("/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport", RTLD_NOW);
         if ([NSProcessInfo processInfo].operatingSystemVersion.majorVersion < 17) {
