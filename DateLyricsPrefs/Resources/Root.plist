@@ -215,7 +215,7 @@
 			<key>label</key>
 			<string>Line Scaling</string>
 			<key>footerText</key>
-			<string>Adjust the scale of the lyrics to fit the width of the lock screen date view, or split long syllable-timed lines automatically.</string>
+			<string>Marquee scrolls long lines in sync with the lyric duration. Split Long Lines takes priority for syllable lyrics.</string>
 		</dict>
 
 		<dict>
@@ -233,6 +233,28 @@
 			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
 			<key>id</key>
 			<string>SplitLongLines</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>MarqueeEnabled</string>
+			<key>label</key>
+			<string>Marquee Scrolling</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>arrow.left.and.right.text.vertical</string>
+			</dict>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>id</key>
+			<string>MarqueeEnabled</string>
 		</dict>
 
 		<dict>

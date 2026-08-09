@@ -11,7 +11,7 @@
 			<key>label</key>
 			<string>Musixmatch Fallback</string>
 			<key>footerText</key>
-			<string>Fetch timed lyrics from Musixmatch only when Apple Music has no usable timed score. This uses a community endpoint and may stop working.</string>
+			<string>Apple Music lyrics remain first priority. Musixmatch fills missing timed lyrics and may upgrade Apple line-sync to word-sync when available. This unofficial service may change or rate-limit.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -26,7 +26,7 @@
 				<string>globe</string>
 			</dict>
 			<key>default</key>
-			<false/>
+			<true/>
 			<key>defaults</key>
 			<string>com.shalamand3r.datelyrics</string>
 			<key>PostNotification</key>

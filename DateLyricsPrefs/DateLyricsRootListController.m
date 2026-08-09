@@ -472,20 +472,31 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	else if (style == 3) nextLabel.transform = CGAffineTransformMakeTranslation(currentLabel.bounds.size.width, 0);
 	else if (style == 4) nextLabel.transform = CGAffineTransformMakeScale(0.5, 0.5);
 
-	[UIView animateWithDuration:duration
-						  delay:0
-						options:UIViewAnimationOptionCurveEaseInOut
-					 animations:^{
-						 nextLabel.alpha = 1.0;
-						 nextLabel.transform = CGAffineTransformIdentity;
-
-						 if (style == 0) currentLabel.alpha = 0.0;
-						 else if (style == 1) { currentLabel.transform = CGAffineTransformMakeTranslation(0, -20); currentLabel.alpha = 0.0; }
-						 else if (style == 2) { currentLabel.transform = CGAffineTransformMakeTranslation(0, 20); currentLabel.alpha = 0.0; }
-						 else if (style == 3) { currentLabel.transform = CGAffineTransformMakeTranslation(-currentLabel.bounds.size.width, 0); currentLabel.alpha = 0.0; }
-						 else if (style == 4) { currentLabel.transform = CGAffineTransformMakeScale(1.5, 1.5); currentLabel.alpha = 0.0; }
-					 }
-					 completion:^(BOOL finished) {
+	[UIView animateKeyframesWithDuration:duration
+							  delay:0
+							options:UIViewKeyframeAnimationOptionCalculationModeCubic
+						 animations:^{
+		if (style == 0 || style == 4) {
+			[UIView addKeyframeWithRelativeStartTime:0.0 relativeDuration:0.45 animations:^{
+				currentLabel.alpha = 0.0;
+				if (style == 4) currentLabel.transform = CGAffineTransformMakeScale(1.1, 1.1);
+			}];
+			[UIView addKeyframeWithRelativeStartTime:0.55 relativeDuration:0.45 animations:^{
+				nextLabel.alpha = 1.0;
+				nextLabel.transform = CGAffineTransformIdentity;
+			}];
+		} else {
+			[UIView addKeyframeWithRelativeStartTime:0.0 relativeDuration:1.0 animations:^{
+				nextLabel.alpha = 1.0;
+				nextLabel.transform = CGAffineTransformIdentity;
+				if (style == 1) currentLabel.transform = CGAffineTransformMakeTranslation(0, -20);
+				else if (style == 2) currentLabel.transform = CGAffineTransformMakeTranslation(0, 20);
+				else currentLabel.transform = CGAffineTransformMakeTranslation(-currentLabel.bounds.size.width, 0);
+				currentLabel.alpha = 0.0;
+			}];
+		}
+	}
+						 completion:^(BOOL finished) {
 						 [self amlRefreshMainPreview];
 						 currentLabel.alpha = 1.0;
 						 currentLabel.transform = CGAffineTransformIdentity;
@@ -1262,20 +1273,31 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	else if (style == 3) nextLabel.transform = CGAffineTransformMakeTranslation(currentLabel.bounds.size.width, 0);
 	else if (style == 4) nextLabel.transform = CGAffineTransformMakeScale(0.5, 0.5);
 
-	[UIView animateWithDuration:duration
-						  delay:0
-						options:UIViewAnimationOptionCurveEaseInOut
-					 animations:^{
-						 nextLabel.alpha = 1.0;
-						 nextLabel.transform = CGAffineTransformIdentity;
-
-						 if (style == 0) currentLabel.alpha = 0.0;
-						 else if (style == 1) { currentLabel.transform = CGAffineTransformMakeTranslation(0, -20); currentLabel.alpha = 0.0; }
-						 else if (style == 2) { currentLabel.transform = CGAffineTransformMakeTranslation(0, 20); currentLabel.alpha = 0.0; }
-						 else if (style == 3) { currentLabel.transform = CGAffineTransformMakeTranslation(-currentLabel.bounds.size.width, 0); currentLabel.alpha = 0.0; }
-						 else if (style == 4) { currentLabel.transform = CGAffineTransformMakeScale(1.5, 1.5); currentLabel.alpha = 0.0; }
-					 }
-					 completion:^(BOOL finished) {
+	[UIView animateKeyframesWithDuration:duration
+							  delay:0
+							options:UIViewKeyframeAnimationOptionCalculationModeCubic
+						 animations:^{
+		if (style == 0 || style == 4) {
+			[UIView addKeyframeWithRelativeStartTime:0.0 relativeDuration:0.45 animations:^{
+				currentLabel.alpha = 0.0;
+				if (style == 4) currentLabel.transform = CGAffineTransformMakeScale(1.1, 1.1);
+			}];
+			[UIView addKeyframeWithRelativeStartTime:0.55 relativeDuration:0.45 animations:^{
+				nextLabel.alpha = 1.0;
+				nextLabel.transform = CGAffineTransformIdentity;
+			}];
+		} else {
+			[UIView addKeyframeWithRelativeStartTime:0.0 relativeDuration:1.0 animations:^{
+				nextLabel.alpha = 1.0;
+				nextLabel.transform = CGAffineTransformIdentity;
+				if (style == 1) currentLabel.transform = CGAffineTransformMakeTranslation(0, -20);
+				else if (style == 2) currentLabel.transform = CGAffineTransformMakeTranslation(0, 20);
+				else currentLabel.transform = CGAffineTransformMakeTranslation(-currentLabel.bounds.size.width, 0);
+				currentLabel.alpha = 0.0;
+			}];
+		}
+	}
+						 completion:^(BOOL finished) {
 						 [self amlUpdatePreviewLabel];
 						 currentLabel.alpha = 1.0;
 						 currentLabel.transform = CGAffineTransformIdentity;
