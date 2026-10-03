@@ -1,5 +1,5 @@
 TARGET := iphone:clang:16.5:16.0
-THEOS_PACKAGE_SCHEME = rootless
+THEOS_PACKAGE_SCHEME ?= rootless
 INSTALL_TARGET_PROCESSES = Music SpringBoard
 
 include $(THEOS)/makefiles/common.mk

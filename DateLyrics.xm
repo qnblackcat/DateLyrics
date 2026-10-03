@@ -8,6 +8,7 @@
 #import <math.h>
 #import <float.h>
 #import <ctype.h>
+#import <roothide.h>
 
 @interface ICURLResponse : NSObject
 @property (nonatomic, readonly) NSData *bodyData;
@@ -4170,7 +4171,7 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
     void (^reloadBlock)(void) = ^{
         CFPreferencesAppSynchronize((__bridge CFStringRef)@"com.shalamand3r.datelyrics");
 
-        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/jb/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:jbroot(@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist")];
         if (!prefs) {
             prefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.plist"];
         }

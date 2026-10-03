@@ -1,14 +1,25 @@
 #!/bin/sh
 
-# Rootless package upgrades preserve existing directory modes. Ensure the
-# preference loader can traverse and read the bundle after an upgrade.
-chmod 755 /var/jb/Library /var/jb/Library/PreferenceBundles \
-    /var/jb/Library/PreferenceBundles/DateLyricsPrefs.bundle 2>/dev/null || true
-chmod 644 /var/jb/Library/MobileSubstrate/DynamicLibraries/DateLyrics.plist \
-    /var/jb/Library/PreferenceLoader/Preferences/DateLyricsPrefs.plist \
-    /var/jb/Library/PreferenceBundles/DateLyricsPrefs.bundle/Info.plist \
-    /var/jb/Library/PreferenceBundles/DateLyricsPrefs.bundle/Root.plist \
-    /var/jb/Library/PreferenceBundles/DateLyricsPrefs.bundle/*.png \
-    /var/jb/Library/PreferenceBundles/DateLyricsPrefs.bundle/preview.xml 2>/dev/null || true
+# Resolve the jailbreak root as seen by this script: roothide runs maintainer
+# scripts with "/" mapped to its randomised jbroot (and the real rootfs under
+# /rootfs), rootless installs under /var/jb, and rootful installs at "/".
+if [ -d /rootfs/var/mobile ]; then
+    JBROOT=""
+elif [ -d /var/jb ]; then
+    JBROOT="/var/jb"
+else
+    JBROOT=""
+fi
+
+# Package upgrades preserve existing directory modes. Ensure the preference
+# loader can traverse and read the bundle after an upgrade.
+chmod 755 "$JBROOT/Library" "$JBROOT/Library/PreferenceBundles" \
+    "$JBROOT/Library/PreferenceBundles/DateLyricsPrefs.bundle" 2>/dev/null || true
+chmod 644 "$JBROOT/Library/MobileSubstrate/DynamicLibraries/DateLyrics.plist" \
+    "$JBROOT/Library/PreferenceLoader/Preferences/DateLyricsPrefs.plist" \
+    "$JBROOT/Library/PreferenceBundles/DateLyricsPrefs.bundle/Info.plist" \
+    "$JBROOT/Library/PreferenceBundles/DateLyricsPrefs.bundle/Root.plist" \
+    "$JBROOT"/Library/PreferenceBundles/DateLyricsPrefs.bundle/*.png \
+    "$JBROOT/Library/PreferenceBundles/DateLyricsPrefs.bundle/preview.xml" 2>/dev/null || true
 
 exit 0

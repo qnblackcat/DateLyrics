@@ -23,7 +23,9 @@ DateLyrics brings Apple Music lyrics to the lock screen date widget view. Lyrics
 
 ## Compatibility
 
-DateLyrics supports any **rootless jailbreak** on iOS 16.0 and later. Users running semi-jailbreaks such as **NathanLR** will need to inject tweaks into the Music application in order for DateLyrics to work.
+DateLyrics supports any **rootless** or **roothide** jailbreak on iOS 16.0 and later (install the `iphoneos-arm64e` package on roothide). Users running semi-jailbreaks such as **NathanLR** will need to inject tweaks into the Music application in order for DateLyrics to work.
+
+To build the roothide package, use the [roothide fork of Theos](https://github.com/roothide/theos) and run `make package THEOS_PACKAGE_SCHEME=roothide`.
 
 Download the latest version from **[Releases](https://github.com/shalamand3r/DateLyrics/releases)** or **[Add my Sileo Repo](https://shalamand3r.github.io)**
 

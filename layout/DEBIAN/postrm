@@ -2,10 +2,18 @@
 # Must be /bin/sh, not /bin/bash: there is no /bin/bash on a rootless jailbreak,
 # so a bash shebang makes this script fail silently on every uninstall.
 
+# On roothide, "/" inside maintainer scripts is the jbroot and the real
+# filesystem lives under /rootfs. Everything cleaned up here is on the rootfs.
+if [ -d /rootfs/var/mobile ]; then
+    ROOTFS="/rootfs"
+else
+    ROOTFS=""
+fi
+
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
     echo "Cleaning up Apple Music Container..."
     
-    SHARED_DIR="/var/mobile/Library/DateLyrics"
+    SHARED_DIR="$ROOTFS/var/mobile/Library/DateLyrics"
     if [ -d "$SHARED_DIR" ] && [ ! -L "$SHARED_DIR" ]; then
         if [ "$(basename "$SHARED_DIR")" = "DateLyrics" ]; then
             rm -rf "$SHARED_DIR"
@@ -14,16 +22,16 @@ if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
     fi
     
     for bridge in \
-        /var/mobile/Library/Preferences/com.shalamand3r.datelyrics.current-line.txt \
-        /var/mobile/Library/Preferences/com.82flex.amlyrics.current-line.txt; do
+        "$ROOTFS/var/mobile/Library/Preferences/com.shalamand3r.datelyrics.current-line.txt" \
+        "$ROOTFS/var/mobile/Library/Preferences/com.82flex.amlyrics.current-line.txt"; do
         if [ -f "$bridge" ]; then
             rm -f "$bridge"
             echo " ✅ Removed lyrics bridge file"
         fi
     done
     
-    if [ -d "/var/mobile/Containers/Data/Application" ]; then
-        for container in /var/mobile/Containers/Data/Application/*; do
+    if [ -d "$ROOTFS/var/mobile/Containers/Data/Application" ]; then
+        for container in "$ROOTFS"/var/mobile/Containers/Data/Application/*; do
             TARGET="$container/Library/DateLyrics"
             if [ -d "$TARGET" ] && [ ! -L "$TARGET" ] && \
                { grep -q '"host" *: *"music"' "$TARGET/runtime-status.json" 2>/dev/null || \

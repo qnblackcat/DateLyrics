@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <spawn.h>
 #import <sys/wait.h>
+#import <roothide.h>
 #import "DateLyricsRootListController.h"
 
 extern char **environ;
@@ -158,9 +159,9 @@ static UIImage *_cachedGithubIcon = nil;
 
 static NSArray<NSString *> *DateLyricsDebugLogPaths(void) {
     NSString *primaryPath = @"/var/mobile/Library/DateLyrics/tweak-debug.log";
-    NSString *rootlessPath = @"/var/jb/var/mobile/Library/DateLyrics/tweak-debug.log";
+    NSString *jbrootPath = jbroot(primaryPath);
     NSMutableArray *paths = [NSMutableArray arrayWithObject:primaryPath];
-    if (![paths containsObject:rootlessPath]) [paths addObject:rootlessPath];
+    if (![paths containsObject:jbrootPath]) [paths addObject:jbrootPath];
     Class proxyClass = NSClassFromString(@"LSApplicationProxy");
     if ([proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
         id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:@"com.apple.Music"];
@@ -963,7 +964,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
 	[haptic impactOccurred];
 	NSArray<NSArray<NSString *> *> *commands = @[
-		@[ @"/var/jb/usr/bin/killall", @"-9", @"Music" ],
+		@[ jbroot(@"/usr/bin/killall"), @"-9", @"Music" ],
 		@[ @"/usr/bin/killall", @"-9", @"Music" ],
 		@[ @"/bin/killall", @"-9", @"Music" ]
 	];
@@ -986,7 +987,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
 	[haptic impactOccurred];
 	NSArray<NSArray<NSString *> *> *commands = @[
-		@[ @"/var/jb/usr/bin/sbreload" ],
+		@[ jbroot(@"/usr/bin/sbreload") ],
 		@[ @"/usr/bin/sbreload" ],
 		@[ @"/usr/bin/killall", @"-9", @"SpringBoard" ],
 		@[ @"/bin/killall", @"-9", @"SpringBoard" ]
