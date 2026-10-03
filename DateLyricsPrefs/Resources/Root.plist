@@ -37,6 +37,82 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>Display</string>
+			<key>footerText</key>
+			<string>Full-Screen Artwork only shows lyrics when the Lock Screen player is expanded (tap the album art). Instrumental Dots shows • • • before the first lyric and during long instrumental breaks.</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>OnlyExpandedArtwork</string>
+			<key>label</key>
+			<string>Only in Full-Screen Artwork</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>arrow.up.left.and.arrow.down.right</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>InterludeIndicator</string>
+			<key>label</key>
+			<string>Instrumental Dots</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>ellipsis</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSegmentCell</string>
+			<key>key</key>
+			<string>InterludeStyle</string>
+			<key>label</key>
+			<string>Dots Style</string>
+			<key>default</key>
+			<integer>0</integer>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+			<key>validTitles</key>
+			<array>
+				<string>• • •</string>
+				<string>• • • • •</string>
+				<string>• ♪ • ♪ •</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+			</array>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>Typography</string>
 			<key>footerText</key>
 			<string>Decapitalize all letters in lyrics.</string>

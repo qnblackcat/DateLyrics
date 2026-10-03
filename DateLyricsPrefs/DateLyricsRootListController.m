@@ -307,6 +307,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         if ([fontName isKindOfClass:NSString.class]) values[@"CustomFontName"] = fontName;
         values[@"SplitLongLines"] = @([prefs objectForKey:@"SplitLongLines"] ? [prefs boolForKey:@"SplitLongLines"] : YES);
         values[@"ShowAdlibs"] = @([prefs objectForKey:@"ShowAdlibs"] ? [prefs boolForKey:@"ShowAdlibs"] : NO);
+        values[@"InterludeIndicator"] = @([prefs boolForKey:@"InterludeIndicator"]);
         return values;
 }
 @interface LSApplicationProxy : NSObject
@@ -579,6 +580,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 		BOOL showsFontStyle = [prefs[@"UseCustomFont"] boolValue];
 		BOOL transitionsEnabled = prefs[@"TransitionsEnabled"] ? [prefs[@"TransitionsEnabled"] boolValue] : YES;
 		BOOL splitLongLinesEnabled = [prefs[@"SplitLongLines"] boolValue];
+		BOOL interludeIndicatorEnabled = [prefs[@"InterludeIndicator"] boolValue];
 
 		NSIndexSet *fontIndexes = [specs indexesOfObjectsPassingTest:^BOOL(PSSpecifier *spec, NSUInteger idx, BOOL *stop) {
 			return [[[spec propertyForKey:@"key"] description] isEqualToString:@"CustomFontName"] && !showsFontStyle;
@@ -591,6 +593,9 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 			NSString *key = [[spec propertyForKey:@"key"] description];
 			if ([key isEqualToString:@"TransitionStyle"] || [key isEqualToString:@"TransitionDuration"]) {
 				return !transitionsEnabled;
+			}
+			if ([key isEqualToString:@"InterludeStyle"]) {
+				return !interludeIndicatorEnabled;
 			}
 			return NO;
 		}];
@@ -938,6 +943,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	if ([key isEqualToString:@"WordHighlighting"] ||
 	        [key isEqualToString:@"UseCustomFont"] ||
 	        [key isEqualToString:@"TransitionsEnabled"] ||
+	        [key isEqualToString:@"InterludeIndicator"] ||
 	        [key isEqualToString:@"MinimumScale"] ||
 	        [key isEqualToString:@"SplitLongLines"] ||
 	        [key isEqualToString:@"ShowAdlibs"]) {
@@ -1015,6 +1021,9 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	[haptic impactOccurred];
 
     CFPreferencesSetAppValue((__bridge CFStringRef)@"Enabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"OnlyExpandedArtwork", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"InterludeIndicator", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"InterludeStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"ForceLowercase", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"WordHighlighting", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);

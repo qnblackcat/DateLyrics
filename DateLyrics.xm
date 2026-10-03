@@ -78,6 +78,9 @@ typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
 @interface CSProminentEmptyElementView : UIView
 @end
 
+@interface CSCoverSheetViewController : UIViewController
+@end
+
 @interface _UIAnimatingLabel : UILabel
 @end
 
@@ -249,6 +252,7 @@ static void DateLyricsStopMarquee(_UIAnimatingLabel *label);
 static UIView *DateLyricsDetachMarquee(_UIAnimatingLabel *label);
 static BOOL DateLyricsStartMarquee(_UIAnimatingLabel *label, CGFloat overflow, NSTimeInterval remainingLineTime);
 static void DateLyricsRefreshMarqueeContent(_UIAnimatingLabel *label);
+static NSDictionary *DateLyricsInterludePayload(NSArray<DateLyricsTimedLine *> *lines, NSInteger resolvedLineIndex, NSTimeInterval elapsedTime, NSTimeInterval *nextDotOut);
 
 static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInterval elapsedTime, NSInteger *cursorInOut, NSTimeInterval *nextTriggerOut, NSTimeInterval *nextLineTriggerOut) {
     if (!score || score.lines.count == 0) {
@@ -454,6 +458,11 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
             }
         }
     }
+
+    NSTimeInterval nextDot = -1.0;
+    NSDictionary *interludePayload = DateLyricsInterludePayload(lines, resolvedLineIndex, elapsedTime, &nextDot);
+    if (interludePayload) wordPayload = interludePayload;
+    if (nextDot > elapsedTime && (nextWordStart < 0 || nextDot < nextWordStart)) nextWordStart = nextDot;
     
     NSTimeInterval nextTrigger = -1.0;
     if (nextWordStart > elapsedTime) nextTrigger = nextWordStart;
@@ -558,6 +567,23 @@ static void DateLyricsSetUnsynchronizedLyricsID(NSInteger lyricsAdamID, BOOL uns
 }
 
 static BOOL gDateLyricsEnabled = YES;
+// "Only in Full-Screen Artwork". The expanded Lock Screen player is drawn by
+// MediaRemoteUI as background content behind the cover sheet; SpringBoard's
+// view of that state is tracked by the CSCoverSheetViewController hooks.
+static BOOL gDateLyricsOnlyExpandedArtwork = NO;
+// "• • •" before the first lyric and through long instrumental breaks.
+static BOOL gDateLyricsInterludeIndicator = NO;
+static NSInteger gDateLyricsInterludeStyle = 0;
+static BOOL gDateLyricsArtworkExpanded = NO;
+static BOOL gDateLyricsArtworkDetectionAvailable = NO;
+// Whether anyone can see the date label: the cover sheet is presented and the
+// screen is on. Both default to "visible" so a missed hook degrades to the old
+// always-ticking behaviour instead of freezing lyrics.
+static BOOL gDateLyricsCoverSheetVisible = YES;
+static BOOL gDateLyricsScreenOff = NO;
+// Set while catching up after the lock screen returns, so the jump to the
+// current line does not buzz like a real line change.
+static BOOL gDateLyricsCatchingUp = NO;
 static BOOL gDateLyricsForceLowercase = NO;
 static BOOL gDateLyricsWordHighlighting = YES;
 static BOOL gDateLyricsUseCustomFont = NO;
@@ -578,6 +604,106 @@ static NSTimeInterval gDateLyricsMarqueeHoldDuration = 0.5;
 static NSString *GetLyricsRootPath(void);
 static BOOL DateLyricsIsSpringBoardHost(void);
 static BOOL DateLyricsIsMusicHost(void);
+
+// Whether lyrics may be drawn on the Lock Screen right now. Playback tracking
+// and line resolution keep running regardless, so a lyric can appear the moment
+// the player expands. If this iOS version lacks the background-content hooks,
+// the full-screen option is ignored rather than hiding lyrics forever.
+static BOOL DateLyricsLockScreenLive(void) {
+    return gDateLyricsCoverSheetVisible && !gDateLyricsScreenOff;
+}
+
+static BOOL DateLyricsDisplayAllowed(void) {
+    if (!gDateLyricsEnabled) return NO;
+    if (!gDateLyricsOnlyExpandedArtwork || !gDateLyricsArtworkDetectionAvailable) return YES;
+    return gDateLyricsArtworkExpanded;
+}
+
+// Shorter gaps than these keep the old behaviour (date before the first line,
+// previous line through a break), so a breath between lines never flashes dots.
+static const NSTimeInterval kDateLyricsIntroMinimumGap = 3.0;
+static const NSTimeInterval kDateLyricsInterludeMinimumGap = 5.0;
+
+// Each glyph must be a single UTF-16 unit with text presentation: ♪ (U+266A)
+// takes the label colour and dims like a lyric, unlike the 🎵 emoji.
+static NSArray<NSString *> *DateLyricsInterludeGlyphs(void) {
+    switch (gDateLyricsInterludeStyle) {
+        case 1: return @[ @"•", @"•", @"•", @"•", @"•" ];
+        case 2: return @[ @"•", @"♪", @"•", @"♪", @"•" ];
+        default: return @[ @"•", @"•", @"•" ];
+    }
+}
+
+static NSTimeInterval DateLyricsLineSungEnd(DateLyricsTimedLine *line) {
+    NSTimeInterval end = line.end;
+    for (DateLyricsTimedWord *word in line.words) {
+        end = MAX(end, word.end);
+    }
+    return end > line.begin ? end : -1.0;
+}
+
+// The indicator is a synthetic word-timed line, so the normal karaoke renderer
+// dims it and lights the dots, and the normal line transition moves into the
+// next lyric. Its lineId is the gap's start time, which sorts between the two
+// real lines and keeps seek directions correct. With N glyphs, glyph k lights
+// at k/(N+1) of the gap, so the last slice shows them all before the lyric.
+static NSDictionary *DateLyricsInterludePayload(NSArray<DateLyricsTimedLine *> *lines, NSInteger resolvedLineIndex, NSTimeInterval elapsedTime, NSTimeInterval *nextDotOut) {
+    if (nextDotOut) *nextDotOut = -1.0;
+    if (!gDateLyricsInterludeIndicator) return nil;
+
+    NSTimeInterval gapStart = 0.0;
+    NSTimeInterval minimumGap = kDateLyricsIntroMinimumGap;
+    if (resolvedLineIndex >= 0) {
+        DateLyricsTimedLine *line = DateLyricsGetFilteredLine(lines[resolvedLineIndex]);
+        gapStart = line ? DateLyricsLineSungEnd(line) : -1.0;
+        minimumGap = kDateLyricsInterludeMinimumGap;
+    }
+    if (gapStart < 0.0) return nil;
+
+    // No following line means the outro: keep the last lyric, as before.
+    NSTimeInterval gapEnd = -1.0;
+    for (NSInteger i = resolvedLineIndex + 1; i < (NSInteger)lines.count; i++) {
+        DateLyricsTimedLine *next = DateLyricsGetFilteredLine(lines[i]);
+        if (!next) continue;
+        gapEnd = next.begin;
+        break;
+    }
+    if (gapEnd <= elapsedTime || gapEnd - gapStart < minimumGap) return nil;
+
+    // Still singing the line before a long break. Nothing else wakes the
+    // ticker when a line ends, so ask for a wake at the start of the break.
+    if (elapsedTime < gapStart) {
+        if (nextDotOut) *nextDotOut = gapStart;
+        return nil;
+    }
+
+    NSArray<NSString *> *glyphs = DateLyricsInterludeGlyphs();
+    NSTimeInterval step = (gapEnd - gapStart) / (NSTimeInterval)(glyphs.count + 1);
+    NSUInteger litLength = 0;
+    NSUInteger glyphEnd = 0;
+    for (NSUInteger index = 0; index < glyphs.count; index++) {
+        NSTimeInterval lightsAt = gapStart + step * (NSTimeInterval)(index + 1);
+        if (elapsedTime < lightsAt) {
+            if (nextDotOut) *nextDotOut = lightsAt;
+            break;
+        }
+        if (index > 0) glyphEnd += 1; // the separating space
+        glyphEnd += glyphs[index].length;
+        litLength = glyphEnd;
+    }
+
+    NSString *text = [glyphs componentsJoinedByString:@" "];
+    NSRange litRange = litLength > 0 ? NSMakeRange(0, litLength) : NSMakeRange(NSNotFound, 0);
+    NSMutableDictionary *payload = [DateLyricsMakePayload(text, litRange) mutableCopy];
+    payload[@"timed"] = @YES;
+    payload[@"wordTimed"] = @YES;
+    payload[@"started"] = @YES;
+    payload[@"finished"] = @NO;
+    payload[@"interlude"] = @YES;
+    payload[@"lineId"] = @(gapStart);
+    payload[@"lineDuration"] = @(gapEnd - gapStart);
+    return [payload copy];
+}
 // Opt-in diagnostics for SpringBoard rendering and Music lyric ingestion.
 static void DateLyricsWriteDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void DateLyricsWriteDebugLog(NSString *format, ...) {
@@ -693,7 +819,7 @@ static void DateLyricsSchedulePauseHideTimer(void) {
 
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     gDateLyricsPauseHideTimer = timer;
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 0);
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 100 * NSEC_PER_MSEC);
     dispatch_source_set_event_handler(timer, ^{
         if (gDateLyricsPauseHideTimer != timer) return;
         gDateLyricsPauseHideTimer = nil;
@@ -721,6 +847,15 @@ static void DateLyricsScheduleTicker(void) {
     }
     
     float rate = MAX(0.0f, [gDateLyricsLocalAnchor[@"rate"] floatValue]);
+
+    // Nobody can see the label: the cover sheet is dismissed or the screen is
+    // off. Stop waking SpringBoard for every syllable; the cover sheet hooks
+    // call back in here on return and resolve straight from the anchor. A
+    // pause still resolves once so the pause-hide timer can clear the lyric.
+    if (rate > 0.0f && !DateLyricsLockScreenLive()) {
+        DateLyricsCancelPauseHideTimer();
+        return;
+    }
     
     NSTimeInterval anchorElapsed = [gDateLyricsLocalAnchor[@"elapsed"] doubleValue];
     NSTimeInterval atHostTime = [gDateLyricsLocalAnchor[@"atHostTime"] doubleValue];
@@ -864,7 +999,7 @@ static void DateLyricsScheduleTicker(void) {
         // Haptics logic
         NSString *previousText = previousPayload[@"text"];
         NSString *nextText = payload[@"text"];
-        if (previousText.length > 0 && nextText.length > 0) {
+        if (previousText.length > 0 && nextText.length > 0 && ![payload[@"interlude"] boolValue]) {
             id previousLineID = previousPayload[@"lineId"];
             id nextLineID = payload[@"lineId"];
             BOOL lineChanged = previousLineID && nextLineID && ![previousLineID isEqual:nextLineID];
@@ -905,7 +1040,9 @@ static void DateLyricsScheduleTicker(void) {
     }
     if (delay >= 0.0) {
         gDateLyricsTicker = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-        dispatch_source_set_timer(gDateLyricsTicker, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 0);
+        // 10 ms of leeway lets the kernel coalesce this wake with others;
+        // that is well below what a lyric highlight can visibly drift by.
+        dispatch_source_set_timer(gDateLyricsTicker, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
         dispatch_source_set_event_handler(gDateLyricsTicker, ^{
             DateLyricsScheduleTicker();
         });
@@ -1110,7 +1247,7 @@ static void DateLyricsApplyCurrentLineToAllCoverSheets(void) {
 
 
 static void DateLyricsPlayHaptic(NSInteger style) {
-    if (!gDateLyricsHapticsEnabled || style < 0 || style > 4) return;
+    if (!gDateLyricsHapticsEnabled || gDateLyricsCatchingUp || !DateLyricsDisplayAllowed() || style < 0 || style > 4) return;
     void (^playBlock)(void) = ^{
         static NSMutableDictionary<NSNumber *, UIImpactFeedbackGenerator *> *generators = nil;
         static dispatch_once_t onceToken;
@@ -1911,6 +2048,7 @@ static void DateLyricsWriteRuntimeStatus(void) {
         @"osVersion": [NSString stringWithFormat:@"%ld.%ld.%ld", (long)version.majorVersion, (long)version.minorVersion, (long)version.patchVersion],
         @"CSProminentSubtitleDateView": @(NSClassFromString(@"CSProminentSubtitleDateView") != nil),
         @"CSProminentEmptyElementView": @(NSClassFromString(@"CSProminentEmptyElementView") != nil),
+        @"ExpandedArtworkDetection": @(gDateLyricsArtworkDetectionAvailable),
         @"UIAnimatingLabel": @(NSClassFromString(@"_UIAnimatingLabel") != nil),
         @"MSVLyricsTTMLParser": @(NSClassFromString(@"MSVLyricsTTMLParser") != nil),
         @"ICMusicKitURLRequest": @(NSClassFromString(@"ICMusicKitURLRequest") != nil),
@@ -3473,13 +3611,13 @@ static void DateLyricsSetWidgetDateSlotHidden(UIView *containerView, UIView *dat
 }
 
 static BOOL DateLyricsShouldSuppressStockDate(void) {
-    if (!gDateLyricsEnabled || !gDateLyricsCurrentScore || !gDateLyricsLocalAnchor) return NO;
+    if (!DateLyricsDisplayAllowed() || !gDateLyricsCurrentScore || !gDateLyricsLocalAnchor) return NO;
     if ([gDateLyricsLocalAnchor[@"rate"] floatValue] <= 0.0f) return NO;
     return DateLyricsHasRenderableLyricPayload();
 }
 
 static BOOL DateLyricsHasRenderableLyricPayload(void) {
-    if (!gDateLyricsEnabled) return NO;
+    if (!DateLyricsDisplayAllowed()) return NO;
     NSString *text = gDateLyricsCurrentPayload[@"text"];
     return [text isKindOfClass:NSString.class] && text.length > 0;
 }
@@ -3629,7 +3767,7 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     NSDictionary *payload = DateLyricsCurrentRenderablePayload();
     BOOL hasLyric = [payload[@"text"] isKindOfClass:NSString.class];
 
-    if (!gDateLyricsEnabled) hasLyric = NO;
+    if (!DateLyricsDisplayAllowed()) hasLyric = NO;
 
     if (!hasLyric) {
         if ([objc_getAssociatedObject(dateView, kDateLyricsForcedWidgetDateVisibleKey) boolValue]) {
@@ -3681,7 +3819,7 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
     NSDictionary *payload = DateLyricsCurrentRenderablePayload();
     NSString *lyric = payload[@"text"];
-    if (lyric.length > 0 && gDateLyricsEnabled) {
+    if (lyric.length > 0 && DateLyricsDisplayAllowed()) {
         label.hidden = NO;
         // While a transition runs, hold the label at the frame captured when it
         // started. UIKit will otherwise re-size the label to its new (shorter or
@@ -3737,6 +3875,118 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
     %orig;
     if (gDateLyricsWidgetSlots) [gDateLyricsWidgetSlots addObject:self];
     DateLyricsUpdateWidgetDateView(self);
+}
+
+%end
+
+// Tapping the Lock Screen artwork makes MediaRemoteUI take a lock screen
+// background-content assertion and draw the full-screen artwork itself.
+// SpringBoard hosts that scene in CSCoverSheetViewController's
+// _backgroundContentViewController and drops it again when the player collapses
+// (the same add/remove that reports the wallpaper as obscured). Present on
+// iOS 16 and 17.
+static NSString *const kDateLyricsMediaRemoteUIBundleID = @"com.apple.MediaRemoteUI";
+
+static NSString *DateLyricsBundleIdentifierOf(id object) {
+    if (![object respondsToSelector:@selector(bundleIdentifier)]) return nil;
+    id bundleID = [object performSelector:@selector(bundleIdentifier)];
+    return [bundleID isKindOfClass:NSString.class] && [bundleID length] > 0 ? bundleID : nil;
+}
+
+static NSString *DateLyricsSceneClientBundleIdentifier(id scene) {
+    if (!scene) return nil;
+    if ([scene respondsToSelector:@selector(clientProcess)]) {
+        NSString *bundleID = DateLyricsBundleIdentifierOf([scene performSelector:@selector(clientProcess)]);
+        if (bundleID) return bundleID;
+    }
+    if ([scene respondsToSelector:@selector(clientHandle)]) {
+        NSString *bundleID = DateLyricsBundleIdentifierOf([scene performSelector:@selector(clientHandle)]);
+        if (bundleID) return bundleID;
+    }
+    if ([scene respondsToSelector:@selector(definition)]) {
+        id definition = [scene performSelector:@selector(definition)];
+        if ([definition respondsToSelector:@selector(clientIdentity)]) {
+            return DateLyricsBundleIdentifierOf([definition performSelector:@selector(clientIdentity)]);
+        }
+    }
+    return nil;
+}
+
+static UIViewController *DateLyricsBackgroundContentViewController(CSCoverSheetViewController *coverSheet) {
+    Ivar ivar = class_getInstanceVariable(object_getClass(coverSheet), "_backgroundContentViewController");
+    if (!ivar) return nil;
+    id controller = object_getIvar(coverSheet, ivar);
+    return [controller isKindOfClass:UIViewController.class] ? controller : nil;
+}
+
+static void DateLyricsSetArtworkExpanded(BOOL expanded) {
+    if (gDateLyricsArtworkExpanded == expanded) return;
+    gDateLyricsArtworkExpanded = expanded;
+    if (!gDateLyricsOnlyExpandedArtwork) return;
+    gDateLyricsRenderGeneration++;
+    DateLyricsApplyCurrentLineToAllCoverSheets();
+}
+
+static void DateLyricsSyncArtworkExpandedState(CSCoverSheetViewController *coverSheet, NSString *reason) {
+    UIViewController *background = DateLyricsBackgroundContentViewController(coverSheet);
+    NSString *clientBundleID = nil;
+    if (background && [background respondsToSelector:@selector(scene)]) {
+        clientBundleID = DateLyricsSceneClientBundleIdentifier([background performSelector:@selector(scene)]);
+    }
+    // If the client cannot be identified, assume Now Playing: wrongly showing
+    // lyrics is a better failure than hiding them in the mode the user wants.
+    BOOL expanded = background && (!clientBundleID || [clientBundleID isEqualToString:kDateLyricsMediaRemoteUIBundleID]);
+    DateLyricsDebugLog(@"[Artwork] %@ (client=%@) -> %@", reason, clientBundleID ?: @"?", expanded ? @"expanded" : @"compact");
+    DateLyricsSetArtworkExpanded(expanded);
+}
+
+static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff, NSString *reason) {
+    BOOL wasLive = DateLyricsLockScreenLive();
+    gDateLyricsCoverSheetVisible = coverSheetVisible;
+    gDateLyricsScreenOff = screenOff;
+    BOOL live = DateLyricsLockScreenLive();
+    if (live == wasLive) return;
+
+    DateLyricsDebugLog(@"[Ticker] lock screen %@ (%@)", live ? @"live" : @"hidden", reason);
+    if (live) {
+        gDateLyricsCatchingUp = YES;
+        DateLyricsScheduleTicker();
+        gDateLyricsCatchingUp = NO;
+    } else if (gDateLyricsTicker) {
+        dispatch_source_cancel(gDateLyricsTicker);
+        gDateLyricsTicker = nil;
+    }
+}
+
+%hook CSCoverSheetViewController
+
+// Presented when the device locks or Notification Center is pulled down;
+// dismissed on unlock. Only a completed dismissal counts, so a cancelled
+// unlock swipe never stops the ticker.
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    DateLyricsSetLockScreenState(YES, gDateLyricsScreenOff, @"cover sheet appearing");
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+    DateLyricsSetLockScreenState(NO, gDateLyricsScreenOff, @"cover sheet dismissed");
+}
+
+// The flag the cover sheet itself uses to pause its widgets with the backlight.
+- (void)setInScreenOffMode:(BOOL)screenOff forAutoUnlock:(BOOL)autoUnlock fromUnlockSource:(int)source {
+    %orig;
+    DateLyricsSetLockScreenState(gDateLyricsCoverSheetVisible, screenOff, screenOff ? @"screen off" : @"screen on");
+}
+
+- (void)_addBackgroundContentViewControllerForAction:(id)action {
+    %orig;
+    DateLyricsSyncArtworkExpandedState(self, @"background content added");
+}
+
+- (void)_removeBackgroundContentViewController {
+    %orig;
+    DateLyricsSyncArtworkExpandedState(self, @"background content removed");
 }
 
 %end
@@ -3804,7 +4054,7 @@ static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot) {
 
 %new
 - (void)_amlApplyCurrentLyric {
-    if (!gDateLyricsEnabled) {
+    if (!DateLyricsDisplayAllowed()) {
         DateLyricsRestoreSystemDateLabel(self);
         return;
     }
@@ -4213,6 +4463,10 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
 
 
         gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
+        gDateLyricsOnlyExpandedArtwork = getPrefBool(@"OnlyExpandedArtwork", NO);
+        gDateLyricsInterludeIndicator = getPrefBool(@"InterludeIndicator", NO);
+        gDateLyricsInterludeStyle = getPrefInteger(@"InterludeStyle", 0);
+        if (gDateLyricsInterludeStyle < 0 || gDateLyricsInterludeStyle > 2) gDateLyricsInterludeStyle = 0;
         gDateLyricsForceLowercase = getPrefBool(@"ForceLowercase", NO);
         gDateLyricsWordHighlighting = getPrefBool(@"WordHighlighting", YES);
         gDateLyricsHapticsEnabled = getPrefBool(@"HapticsEnabled", NO);
@@ -4463,6 +4717,14 @@ static void DateLyricsHandleAnchorRequest(CFNotificationCenterRef center, void *
         gDateLyricsDateViews = [NSHashTable weakObjectsHashTable];
         gDateLyricsWidgetSlots = [NSHashTable weakObjectsHashTable];
         gDateLyricsCurrentPayload = nil;
+        Class coverSheetClass = NSClassFromString(@"CSCoverSheetViewController");
+        gDateLyricsArtworkDetectionAvailable = coverSheetClass &&
+            class_getInstanceVariable(coverSheetClass, "_backgroundContentViewController") &&
+            [coverSheetClass instancesRespondToSelector:@selector(_addBackgroundContentViewControllerForAction:)] &&
+            [coverSheetClass instancesRespondToSelector:@selector(_removeBackgroundContentViewController)];
+        if (!gDateLyricsArtworkDetectionAvailable) {
+            DateLyricsDebugLog(@"[Artwork] background content hooks unavailable; full-screen-only option disabled");
+        }
         DateLyricsWriteRuntimeStatus();
         
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsHandleAnchorChanged, CFSTR("com.shalamand3r.datelyrics/anchor.changed"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
