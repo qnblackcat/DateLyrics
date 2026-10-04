@@ -1,8 +1,6 @@
 # Theos
 .theos/
-packages/
 obj/
-*.deb
 
 # Logs and References
 reference/

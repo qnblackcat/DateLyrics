@@ -115,7 +115,7 @@
 			<key>label</key>
 			<string>Typography</string>
 			<key>footerText</key>
-			<string>Decapitalize all letters in lyrics.</string>
+			<string>Italicize or decapitalize all letters in lyrics.</string>
 		</dict>
 
 		<dict>
@@ -152,6 +152,26 @@
 			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
 			<key>requires</key>
 			<string>UseCustomFont</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>ItalicLyrics</string>
+			<key>label</key>
+			<string>Italic Lyrics</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>italic</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
 		</dict>
 
 		<dict>

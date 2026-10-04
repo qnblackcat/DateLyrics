@@ -1,154 +1,20 @@
-@import Darwin;
-@import Foundation;
-@import MediaPlayer;
-@import QuartzCore;
-@import UIKit;
-#import <objc/runtime.h>
-#import <stdarg.h>
-#import <math.h>
-#import <float.h>
-#import <ctype.h>
-#import <roothide.h>
-
-@interface ICURLResponse : NSObject
-@property (nonatomic, readonly) NSData *bodyData;
-@end
-
-typedef void (^ICURLSessionCompletionHandler)(ICURLResponse *, NSError *);
-
-@interface MSVLyricsLine : NSObject
-@property (assign, nonatomic) NSTimeInterval startTime;
-@property (assign, nonatomic) NSTimeInterval endTime;
-@property (copy, nonatomic) NSAttributedString *lyricsText;
-@end
-
-@interface ICMusicKitRequestContext : NSObject
-@end
-
-@interface ICMusicKitURLRequest : NSObject
-@property (nonatomic, copy, readonly) ICMusicKitRequestContext *requestContext;
-- (instancetype)initWithURL:(NSURL *)arg1 requestContext:(ICMusicKitRequestContext *)arg2;
-@end
-
-@interface MRContentItemMetadata : NSObject
-@property (assign, nonatomic) NSInteger iTunesStoreIdentifier;
-@property (assign, nonatomic) NSTimeInterval elapsedTime;
-@property (assign, nonatomic) BOOL lyricsAvailable;
-@property (assign, nonatomic) NSInteger lyricsAdamID;
-@end
-
-@interface MRContentItem : NSObject
-@property (nonatomic, copy) MRContentItemMetadata *metadata;
-@end
-
-@interface MPNowPlayingContentItem : MPContentItem
-@property (assign, nonatomic) NSInteger storeID;
-@property (assign, nonatomic) float playbackRate;
-@property (nonatomic, strong) NSNumber *amlPlaybackRate;
-@property (nonatomic, strong) NSNumber *amlLastSystemElapsedTime;
-@property (nonatomic, strong) NSNumber *amlLastSystemTime;
-@property (assign, nonatomic) NSInteger amlLastStoreID;
-- (NSTimeInterval)calculatedElapsedTime;
-- (void)setElapsedTime:(double)elapsedTime playbackRate:(float)arg2;
-@end
-
-@interface MSVLyricsTTMLParser : NSObject
-- (instancetype)initWithTTMLData:(NSData *)data;
-- (NSArray<MSVLyricsLine *> *)lyricLines;
-- (id)parseWithError:(id*)arg1;
-@end
-
-@interface ICURLSession : NSObject
-- (void)enqueueDataRequest:(id)arg1 withCompletionHandler:(ICURLSessionCompletionHandler)arg2;
-@end
-
-@interface MRNowPlayingPlayerClient : NSObject
-@property (nonatomic, readonly) MRContentItem *nowPlayingContentItem;
-- (void)sendContentItemChanges:(NSArray<MRContentItem *> *)contentItems;
-@end
-
-@interface LSApplicationProxy : NSObject
-+ (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
-@property (nonatomic, readonly) NSURL *dataContainerURL;
-@end
-
-@interface CSProminentSubtitleDateView : UIView
-@end
-
-@interface CSProminentEmptyElementView : UIView
-@end
-
-@interface CSCoverSheetViewController : UIViewController
-@end
-
-@interface _UIAnimatingLabel : UILabel
-@end
-
-@interface _UIAnimatingLabel (DateLyrics)
-- (void)_amlApplyCurrentLyric;
-@end
-
-@interface LyricsTask : NSObject
-@property (nonatomic, assign) NSInteger iTunesStoreID;
-@property (nonatomic, assign) NSInteger lyricsAdamID;
-@property (nonatomic, assign) NSInteger retryCount;
-@property (nonatomic, strong) NSURL *lyricURL;
-@property (nonatomic, strong) NSString *lyricsFilePath;
-@property (nonatomic, copy) NSString *fallbackTitle;
-@property (nonatomic, copy) NSString *fallbackArtist;
-@property (nonatomic, copy) NSString *fallbackAlbum;
-@property (nonatomic, assign) NSTimeInterval fallbackDuration;
-@end
-
-@interface DateLyricsMusixmatchTask : NSObject
-@property (nonatomic, assign) NSInteger storeID;
-@property (nonatomic, copy) NSString *title;
-@property (nonatomic, copy) NSString *artist;
-@property (nonatomic, copy) NSString *album;
-@property (nonatomic, assign) NSTimeInterval duration;
-@property (nonatomic, copy) NSString *subtitleBody;
-@property (nonatomic, assign) BOOL refreshedToken;
-@property (nonatomic, assign) BOOL wordSyncOnly;
-@property (nonatomic, assign) NSInteger commontrackID;
-@end
-
-@interface DateLyricsTimedWord : NSObject
-@property (nonatomic, assign) NSTimeInterval begin;
-@property (nonatomic, assign) NSTimeInterval end;
-@property (nonatomic, copy) NSString *text;
-@property (nonatomic, copy) NSString *separatorBefore;
-@property (nonatomic, assign, getter=isBackground) BOOL background;
-@end
-
-@interface DateLyricsTimedLine : NSObject
-@property (nonatomic, assign) NSTimeInterval begin;
-@property (nonatomic, assign) NSTimeInterval end;
-@property (nonatomic, copy) NSString *text;
-@property (nonatomic, strong) NSArray<DateLyricsTimedWord *> *words;
-// Memoised adlib-filtered form of this line. See DateLyricsGetFilteredLine.
-@property (nonatomic, strong) DateLyricsTimedLine *amlCachedFiltered;
-@property (nonatomic, assign) BOOL amlCachedFilteredValid;
-@property (nonatomic, assign) BOOL amlCachedFilteredAdlibs;
-@end
+#import "DateLyrics.h"
 
 @implementation LyricsTask
 @end
-
 @implementation DateLyricsMusixmatchTask
 @end
-
 @implementation DateLyricsTimedWord
 @end
-
 @implementation DateLyricsTimedLine
 @end
-
-@interface DateLyricsScore : NSObject
-@property (nonatomic, assign) NSInteger trackId;
-@property (nonatomic, assign) BOOL hasWordTiming;
-@property (nonatomic, copy) NSString *source;
-@property (nonatomic, strong) NSArray<DateLyricsTimedLine *> *lines;
-- (instancetype)initWithJSONData:(NSData *)data;
+@implementation DateLyricsWeakBox
+@end
+@implementation DateLyricsSplitPlan
+@end
+@implementation DateLyricsSweepVoice
+@end
+@implementation DateLyricsSweepMask
 @end
 
 static BOOL DateLyricsSerializedLinesHaveTiming(NSArray *rawLines) {
@@ -242,17 +108,9 @@ static BOOL DateLyricsSerializedLinesHaveTiming(NSArray *rawLines) {
 
 static NSInteger gDateLyricsHapticStyleSyllable = 1;
 static NSInteger gDateLyricsHapticStyleLine = 2;
-
-static DateLyricsTimedLine *DateLyricsGetFilteredLine(DateLyricsTimedLine *line);
-static NSDictionary *DateLyricsMakePayload(NSString *text, NSRange activeRange);
-static NSDictionary *DateLyricsMakePayloadWithBackgroundRange(NSString *text, NSRange activeRange, NSRange backgroundRange);
-static void DateLyricsSetRangeFields(NSMutableDictionary *payload, NSString *prefix, NSRange range);
-static void DateLyricsApplyCurrentLineToAllCoverSheets(void);
-static void DateLyricsStopMarquee(_UIAnimatingLabel *label);
-static UIView *DateLyricsDetachMarquee(_UIAnimatingLabel *label);
-static BOOL DateLyricsStartMarquee(_UIAnimatingLabel *label, CGFloat overflow, NSTimeInterval remainingLineTime);
-static void DateLyricsRefreshMarqueeContent(_UIAnimatingLabel *label);
-static NSDictionary *DateLyricsInterludePayload(NSArray<DateLyricsTimedLine *> *lines, NSInteger resolvedLineIndex, NSTimeInterval elapsedTime, NSTimeInterval *nextDotOut);
+// Experimental: light each syllable progressively over its duration instead
+// of switching it on at its start time.
+static BOOL gDateLyricsSmoothSweep = NO;
 
 static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInterval elapsedTime, NSInteger *cursorInOut, NSTimeInterval *nextTriggerOut, NSTimeInterval *nextLineTriggerOut) {
     if (!score || score.lines.count == 0) {
@@ -325,6 +183,14 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                 BOOL hasPreviousWord = NO;
                 NSTimeInterval activeForegroundWordBegin = -1.0;
                 NSTimeInterval activeBackgroundWordBegin = -1.0;
+                // Smooth sweep: the most recently started syllable of each
+                // voice, kept after it ends so the renderer can hold it lit.
+                NSRange sweepForegroundRange = NSMakeRange(NSNotFound, 0);
+                NSRange sweepBackgroundRange = NSMakeRange(NSNotFound, 0);
+                NSTimeInterval sweepForegroundBegin = -1.0;
+                NSTimeInterval sweepForegroundEnd = -1.0;
+                NSTimeInterval sweepBackgroundBegin = -1.0;
+                NSTimeInterval sweepBackgroundEnd = -1.0;
                 NSUInteger foregroundProgressStart = NSNotFound;
                 NSUInteger foregroundProgressEnd = 0;
                 NSUInteger backgroundProgressStart = NSNotFound;
@@ -342,6 +208,11 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                     if (word.isBackground) {
                         if (elapsedTime >= word.begin && backgroundProgressStart == NSNotFound) backgroundProgressStart = wordRange.location;
                         if (elapsedTime >= word.begin) backgroundProgressEnd = MAX(backgroundProgressEnd, NSMaxRange(wordRange));
+                        if (elapsedTime >= word.begin && word.begin >= sweepBackgroundBegin) {
+                            sweepBackgroundRange = wordRange;
+                            sweepBackgroundBegin = word.begin;
+                            sweepBackgroundEnd = word.end;
+                        }
                         if (isActive && (backgroundActiveRange.location == NSNotFound || word.begin >= activeBackgroundWordBegin)) {
                             backgroundActiveRange = wordRange;
                             activeBackgroundWordBegin = word.begin;
@@ -355,6 +226,11 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                     } else {
                         if (elapsedTime >= word.begin && foregroundProgressStart == NSNotFound) foregroundProgressStart = wordRange.location;
                         if (elapsedTime >= word.begin) foregroundProgressEnd = MAX(foregroundProgressEnd, NSMaxRange(wordRange));
+                        if (elapsedTime >= word.begin && word.begin >= sweepForegroundBegin) {
+                            sweepForegroundRange = wordRange;
+                            sweepForegroundBegin = word.begin;
+                            sweepForegroundEnd = word.end;
+                        }
                         if (isActive && (activeRange.location == NSNotFound || word.begin >= activeForegroundWordBegin)) {
                             activeRange = wordRange;
                             activeForegroundWordBegin = word.begin;
@@ -424,6 +300,18 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
                     mutableWordPayload[@"finished"] = @(isLineFinished);
                     mutableWordPayload[@"lineId"] = selectedLineID;
                     if (line.end > line.begin) mutableWordPayload[@"lineDuration"] = @(line.end - line.begin);
+                    if (gDateLyricsSmoothSweep) {
+                        DateLyricsSetRangeFields(mutableWordPayload, @"sweep", sweepForegroundRange);
+                        if (sweepForegroundRange.location != NSNotFound) {
+                            mutableWordPayload[@"sweepBegin"] = @(sweepForegroundBegin);
+                            mutableWordPayload[@"sweepEnd"] = @(sweepForegroundEnd);
+                        }
+                        DateLyricsSetRangeFields(mutableWordPayload, @"bgSweep", sweepBackgroundRange);
+                        if (sweepBackgroundRange.location != NSNotFound) {
+                            mutableWordPayload[@"bgSweepBegin"] = @(sweepBackgroundBegin);
+                            mutableWordPayload[@"bgSweepEnd"] = @(sweepBackgroundEnd);
+                        }
+                    }
                     wordPayload = [mutableWordPayload copy];
                 } else {
                     wordPayload = nil;
@@ -493,29 +381,6 @@ static NSDictionary *DateLyricsResolvePayload(DateLyricsScore *score, NSTimeInte
 
     return wordPayload;
 }
-
-
-@interface DateLyricsWeakBox : NSObject
-@property (nonatomic, weak) id object;
-@end
-
-@implementation DateLyricsWeakBox
-@end
-
-// Cached word-wrap result for one lyric line, held on the label it was computed for.
-// segments == nil means "measured, does not need splitting".
-@interface DateLyricsSplitPlan : NSObject
-@property (nonatomic, copy) NSString *text;
-@property (nonatomic, strong) id lineId;
-@property (nonatomic, assign) NSInteger trackId;
-@property (nonatomic, assign) CGFloat width;
-@property (nonatomic, copy) NSString *fontKey;
-@property (nonatomic, strong) NSArray<NSValue *> *segments;
-@property (nonatomic, assign) NSUInteger lastIndex;
-@end
-
-@implementation DateLyricsSplitPlan
-@end
 
 static dispatch_queue_t gLyricsQueue = nil;
 static ICURLSession *gSession = nil;
@@ -588,6 +453,7 @@ static BOOL gDateLyricsForceLowercase = NO;
 static BOOL gDateLyricsWordHighlighting = YES;
 static BOOL gDateLyricsUseCustomFont = NO;
 static NSString *gDateLyricsCustomFontName = nil;
+static BOOL gDateLyricsItalicLyrics = NO;
 static BOOL gDateLyricsTransitionsEnabled = YES;
 static NSInteger gDateLyricsTransitionStyle = 1;
 static NSTimeInterval gDateLyricsTransitionDuration = 0.3;
@@ -601,9 +467,6 @@ static BOOL gDateLyricsMusixmatchEnabled = YES;
 // ticker/render event and should never be enabled in a normal install.
 static BOOL gDateLyricsDebugLogging = NO;
 static NSTimeInterval gDateLyricsMarqueeHoldDuration = 0.5;
-static NSString *GetLyricsRootPath(void);
-static BOOL DateLyricsIsSpringBoardHost(void);
-static BOOL DateLyricsIsMusicHost(void);
 
 // Whether lyrics may be drawn on the Lock Screen right now. Playback tracking
 // and line resolution keep running regardless, so a lyric can appear the moment
@@ -705,7 +568,6 @@ static NSDictionary *DateLyricsInterludePayload(NSArray<DateLyricsTimedLine *> *
     return [payload copy];
 }
 // Opt-in diagnostics for SpringBoard rendering and Music lyric ingestion.
-static void DateLyricsWriteDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void DateLyricsWriteDebugLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
@@ -780,16 +642,41 @@ static void DateLyricsClearEarlyLinePreview(void) {
     gDateLyricsEarlyLineNextTrigger = -1.0;
     gDateLyricsEarlyLineTrackId = 0;
 }
-static void DateLyricsScheduleTicker(void);
-static void DateLyricsCancelPauseHideTimer(void);
-static void DateLyricsSchedulePauseHideTimer(void);
 
 static NSTimeInterval DateLyricsMonotonicTime(void) {
     return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1e9;
 }
 
-static void DateLyricsPlayHaptic(NSInteger style);
-static NSString *DateLyricsHighlightSignature(NSDictionary *payload);
+// Playback clock the smooth sweep animations are timed against. It follows the
+// ticker's resolved position but ignores the few-millisecond corrections every
+// periodic anchor brings, so a running sweep is only restarted for a pause,
+// resume, seek, or real drift.
+static BOOL gDateLyricsSweepClockValid = NO;
+static NSTimeInterval gDateLyricsSweepClockElapsed = 0.0;
+static NSTimeInterval gDateLyricsSweepClockHost = 0.0;
+static float gDateLyricsSweepClockRate = 0.0f;
+
+static BOOL DateLyricsSyncSweepClock(NSTimeInterval elapsed, NSTimeInterval host, float rate) {
+    if (gDateLyricsSweepClockValid && fabsf(rate - gDateLyricsSweepClockRate) < 0.001f) {
+        NSTimeInterval predicted = gDateLyricsSweepClockElapsed + (host - gDateLyricsSweepClockHost) * gDateLyricsSweepClockRate;
+        NSTimeInterval drift = elapsed - predicted;
+        // Pulling a running sweep backwards is more visible than letting it
+        // lead slightly, so tolerate more drift in that direction.
+        if (drift > -0.15 && drift < 0.05) return NO;
+    }
+    gDateLyricsSweepClockValid = YES;
+    gDateLyricsSweepClockElapsed = elapsed;
+    gDateLyricsSweepClockHost = host;
+    gDateLyricsSweepClockRate = rate;
+    return YES;
+}
+
+static BOOL DateLyricsSweepSongTime(NSTimeInterval *songTimeOut, float *rateOut) {
+    if (!gDateLyricsSweepClockValid) return NO;
+    if (songTimeOut) *songTimeOut = gDateLyricsSweepClockElapsed + (DateLyricsMonotonicTime() - gDateLyricsSweepClockHost) * gDateLyricsSweepClockRate;
+    if (rateOut) *rateOut = gDateLyricsSweepClockRate;
+    return YES;
+}
 
 static void DateLyricsCancelPauseHideTimer(void) {
     if (gDateLyricsPauseHideTimer) {
@@ -892,6 +779,7 @@ static void DateLyricsScheduleTicker(void) {
         gDateLyricsLastResolvedElapsed = -1.0;
         gDateLyricsRenderGeneration++;
     }
+    BOOL jitterClamped = NO;
     if (gDateLyricsLastResolvedElapsed >= 0.0) {
         NSTimeInterval backwards = gDateLyricsLastResolvedElapsed - currentElapsed;
         movedBackwardBySeek = isExplicitSeek && backwards > 0.001;
@@ -899,10 +787,14 @@ static void DateLyricsScheduleTicker(void) {
             DateLyricsDebugLog(@"[Ticker] clamped %.3fs backwards jitter (%.3f -> %.3f)",
                                backwards, gDateLyricsLastResolvedElapsed, currentElapsed);
             currentElapsed = gDateLyricsLastResolvedElapsed;
+            jitterClamped = YES;
         }
     }
     gDateLyricsLastResolvedElapsed = currentElapsed;
     gDateLyricsLastResolutionWasBackwardSeek = movedBackwardBySeek;
+    // A clamped position is a held value, not a clock reading.
+    BOOL sweepClockChanged = gDateLyricsSmoothSweep && !jitterClamped &&
+        DateLyricsSyncSweepClock(currentElapsed, nowHost, rate);
 
     // A seek, pause, track swap, or score replacement invalidates a pending
     // early line.  In particular, never carry an early forward payload across
@@ -965,6 +857,10 @@ static void DateLyricsScheduleTicker(void) {
                     [earlyPayload removeObjectForKey:@"focusLen"];
                     [earlyPayload removeObjectForKey:@"focusBgLoc"];
                     [earlyPayload removeObjectForKey:@"focusBgLen"];
+                    for (NSString *key in @[@"sweepLoc", @"sweepLen", @"sweepBegin", @"sweepEnd",
+                                            @"bgSweepLoc", @"bgSweepLen", @"bgSweepBegin", @"bgSweepEnd"]) {
+                        [earlyPayload removeObjectForKey:key];
+                    }
                     earlyPayload[@"started"] = @NO;
                     earlyPayload[@"finished"] = @NO;
                 }
@@ -1015,8 +911,11 @@ static void DateLyricsScheduleTicker(void) {
         }
         
         DateLyricsApplyCurrentLineToAllCoverSheets();
+    } else if (sweepClockChanged) {
+        // Same syllable, new timing (pause, resume, seek within it).
+        DateLyricsSweepResyncAllLabels();
     }
-    
+
     if (rate <= 0.0f) {
         DateLyricsSchedulePauseHideTimer();
         DateLyricsDebugLog(@"[Ticker] paused at %.2f", currentElapsed);
@@ -1051,68 +950,8 @@ static void DateLyricsScheduleTicker(void) {
 }
 static BOOL gDateLyricsHapticsEnabled = NO;
 
-static void DateLyricsUpdateWidgetDateView(UIView *widgetSlot);
-static _UIAnimatingLabel *DateLyricsFindAnimatingLabel(UIView *view);
-static void DateLyricsPrepareAndApplyDateLabel(_UIAnimatingLabel *label);
-static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label);
-static void DateLyricsInvalidateLabelRenderCache(_UIAnimatingLabel *label);
-static BOOL DateLyricsHasRenderableLyricPayload(void);
-static const void *kDateLyricsForcedWidgetDateVisibleKey = &kDateLyricsForcedWidgetDateVisibleKey;
-static const void *kDateLyricsOriginalHiddenKey = &kDateLyricsOriginalHiddenKey;
-static const void *kDateLyricsRestoringStockDateKey = &kDateLyricsRestoringStockDateKey;
-static const void *kDateLyricsLabelShowingLyricKey = &kDateLyricsLabelShowingLyricKey;
-static const void *kDateLyricsLastRenderedAttrTextKey = &kDateLyricsLastRenderedAttrTextKey;
-static const void *kDateLyricsLastRenderedTextKey = &kDateLyricsLastRenderedTextKey;
-static const void *kDateLyricsRenderCacheKey = &kDateLyricsRenderCacheKey;
-static const void *kDateLyricsAnimatingTransitionKey = &kDateLyricsAnimatingTransitionKey;
-static const void *kDateLyricsMarqueeActiveKey = &kDateLyricsMarqueeActiveKey;
-static const void *kDateLyricsMarqueeLineIdKey = &kDateLyricsMarqueeLineIdKey;
-static const void *kDateLyricsMarqueeContainerKey = &kDateLyricsMarqueeContainerKey;
-static const void *kDateLyricsMarqueeContentLabelKey = &kDateLyricsMarqueeContentLabelKey;
-static const void *kDateLyricsTransitionGenerationKey = &kDateLyricsTransitionGenerationKey;
-static const void *kDateLyricsOriginalClipsToBoundsKey = &kDateLyricsOriginalClipsToBoundsKey;
-static const void *kDateLyricsOriginalFontKey = &kDateLyricsOriginalFontKey;
-static const void *kDateLyricsOriginalTextColorKey = &kDateLyricsOriginalTextColorKey;
-static const void *kDateLyricsOriginalNumberOfLinesKey = &kDateLyricsOriginalNumberOfLinesKey;
-static const void *kDateLyricsOriginalAdjustsFontSizeKey = &kDateLyricsOriginalAdjustsFontSizeKey;
-static const void *kDateLyricsOriginalMinScaleKey = &kDateLyricsOriginalMinScaleKey;
-static const void *kDateLyricsOriginalLineBreakModeKey = &kDateLyricsOriginalLineBreakModeKey;
-static const void *kDateLyricsOriginalAttributedTextKey = &kDateLyricsOriginalAttributedTextKey;
-static const void *kDateLyricsOriginalTextKey = &kDateLyricsOriginalTextKey;
-// Set once on the specific label we drive, so the _UIAnimatingLabel setter hooks
-// can early-out with a single lookup instead of walking the superview chain on
-// every text assignment in SpringBoard.
-static const void *kDateLyricsIsDateLabelKey = &kDateLyricsIsDateLabelKey;
-// Weak-boxed cache of the label a date view owns, so we stop re-running a
-// recursive subview search on every layout pass.
-static const void *kDateLyricsCachedLabelKey = &kDateLyricsCachedLabelKey;
-// Cached widget host view. Widget containers can lay out many times per second;
-// retain the positive recursive lookup while the host remains in the subtree.
-static const void *kDateLyricsCachedWidgetHostKey = &kDateLyricsCachedWidgetHostKey;
-// Cached DateLyricsSplitPlan for the line currently on the label.
-static const void *kDateLyricsSplitPlanKey = &kDateLyricsSplitPlanKey;
-// Latched (grow-only) wrap width for the label. See DateLyricsSplitAvailableWidth.
-static const void *kDateLyricsSplitWidthKey = &kDateLyricsSplitWidthKey;
-// Frame the label is pinned to for the duration of a line transition.
-static const void *kDateLyricsFrozenFrameKey = &kDateLyricsFrozenFrameKey;
-// Static copy of the outgoing line. Keeping the real label live allows
-// syllable colours to update while the line transition is still running.
-static const void *kDateLyricsOutgoingSnapshotKey = &kDateLyricsOutgoingSnapshotKey;
-// Distinguishes our own lyric content writes from SpringBoard's stock date
-// updates. The latter must not replace an active lyric during wake/layout.
-static const void *kDateLyricsApplyingLyricContentKey = &kDateLyricsApplyingLyricContentKey;
-
 static const NSUInteger kDateLyricsMaxMemoryCacheEntries = 40;
 static const NSUInteger kDateLyricsMaxDiskCacheEntries = 100;
-static NSString *GetLyricsRootPath(void);
-
-typedef NS_ENUM(NSInteger, DateLyricsTransitionStyle) {
-    DateLyricsTransitionStyleFade = 0,
-    DateLyricsTransitionStyleSlideUp = 1,
-    DateLyricsTransitionStyleSlideDown = 2,
-    DateLyricsTransitionStylePush = 3,
-    DateLyricsTransitionStylePop = 4,
-};
 
 static BOOL DateLyricsIsSpringBoardHost(void) {
     static BOOL isSpringBoard = NO;
@@ -1158,7 +997,6 @@ static NSTimeInterval DateLyricsParseTimeString(NSString *value) {
     if (parts.count == 3) return (parts[0].doubleValue * 3600.0) + (parts[1].doubleValue * 60.0) + parts[2].doubleValue;
     return 0;
 }
-
 
 static NSDictionary *DateLyricsMakePayload(NSString *text, NSRange activeRange) {
     if (![text isKindOfClass:NSString.class] || text.length == 0) return nil;
@@ -1227,8 +1065,6 @@ static NSRange DateLyricsRangeFromPayload(NSDictionary *payload, NSString *prefi
     return range;
 }
 
-
-
 static void DateLyricsApplyCurrentLineToAllCoverSheets(void) {
     if (gDateLyricsDateViews) {
         for (CSProminentSubtitleDateView *dateView in gDateLyricsDateViews) {
@@ -1244,7 +1080,6 @@ static void DateLyricsApplyCurrentLineToAllCoverSheets(void) {
         }
     }
 }
-
 
 static void DateLyricsPlayHaptic(NSInteger style) {
     if (!gDateLyricsHapticsEnabled || gDateLyricsCatchingUp || !DateLyricsDisplayAllowed() || style < 0 || style > 4) return;
@@ -1270,7 +1105,6 @@ static void DateLyricsPlayHaptic(NSInteger style) {
     }
 }
 
-
 static NSDictionary *DateLyricsCurrentRenderablePayload(void) {
     return gDateLyricsCurrentPayload;
 }
@@ -1290,7 +1124,6 @@ static UIColor *DateLyricsBaseTextColorForLabel(_UIAnimatingLabel *label) {
     return textColor;
 }
 
-
 static void DateLyricsApplyLabelContent(_UIAnimatingLabel *label, NSString *displayText, NSAttributedString *attrDisplayText) {
     if (![label isKindOfClass:UILabel.class]) return;
     BOOL wasApplying = [objc_getAssociatedObject(label, kDateLyricsApplyingLyricContentKey) boolValue];
@@ -1309,15 +1142,43 @@ static void DateLyricsApplyLabelContent(_UIAnimatingLabel *label, NSString *disp
     [label setNeedsLayout];
 }
 
+// Prefer the font's real italic face; fonts without one get a synthetic ~12° slant.
+static UIFont *DateLyricsItalicFont(UIFont *font) {
+    if (![font isKindOfClass:UIFont.class]) return font;
+    static UIFont *lastSourceFont = nil;
+    static UIFont *lastItalicFont = nil;
+    if (lastSourceFont && [lastSourceFont isEqual:font]) return lastItalicFont;
+
+    UIFontDescriptor *descriptor = font.fontDescriptor;
+    UIFontDescriptorSymbolicTraits traits = descriptor.symbolicTraits;
+    UIFont *italicFont = nil;
+    if (traits & UIFontDescriptorTraitItalic) {
+        italicFont = font;
+    } else {
+        UIFontDescriptor *italicDescriptor = [descriptor fontDescriptorWithSymbolicTraits:traits | UIFontDescriptorTraitItalic];
+        if (italicDescriptor) {
+            UIFont *candidate = [UIFont fontWithDescriptor:italicDescriptor size:font.pointSize];
+            if (candidate.fontDescriptor.symbolicTraits & UIFontDescriptorTraitItalic) italicFont = candidate;
+        }
+        if (!italicFont) {
+            CGAffineTransform slant = CGAffineTransformMake(1.0, 0.0, tan(12.0 * M_PI / 180.0), 1.0, 0.0, 0.0);
+            italicFont = [UIFont fontWithDescriptor:[descriptor fontDescriptorWithMatrix:slant] size:font.pointSize] ?: font;
+        }
+    }
+
+    lastSourceFont = font;
+    lastItalicFont = italicFont;
+    return italicFont;
+}
+
 static UIFont *DateLyricsConfiguredFontForLabel(_UIAnimatingLabel *label) {
     UIFont *originalFont = objc_getAssociatedObject(label, kDateLyricsOriginalFontKey);
     UIFont *baseFont = originalFont ?: label.font ?: [UIFont systemFontOfSize:34.0 weight:UIFontWeightSemibold];
-    if (!gDateLyricsUseCustomFont || gDateLyricsCustomFontName.length == 0) {
-        return baseFont;
+    UIFont *font = baseFont;
+    if (gDateLyricsUseCustomFont && gDateLyricsCustomFontName.length > 0) {
+        font = [UIFont fontWithName:gDateLyricsCustomFontName size:baseFont.pointSize] ?: baseFont;
     }
-
-    UIFont *customFont = [UIFont fontWithName:gDateLyricsCustomFontName size:baseFont.pointSize];
-    return customFont ?: baseFont;
+    return gDateLyricsItalicLyrics ? DateLyricsItalicFont(font) : font;
 }
 
 static CGFloat DateLyricsMeasuredLineWidth(NSString *text, UIFont *font) {
@@ -1713,6 +1574,16 @@ static NSDictionary *DateLyricsSplitPayloadForLabel(NSDictionary *payload, UILab
         }
     }
 
+    // A sweep syllable outside the visible segment leaves the segment static.
+    for (NSString *prefix in @[@"sweep", @"bgSweep"]) {
+        NSRange sweepRange = DateLyricsRangeFromPayload(payload, prefix, text.length);
+        NSRange intersection = sweepRange.location != NSNotFound
+            ? NSIntersectionRange(targetRange, sweepRange) : NSMakeRange(NSNotFound, 0);
+        DateLyricsSetRangeFields(splitPayload, prefix,
+            intersection.length > 0 ? NSMakeRange(intersection.location - targetRange.location, intersection.length)
+                                    : NSMakeRange(NSNotFound, 0));
+    }
+
     return splitPayload;
 }
 
@@ -2015,6 +1886,220 @@ static BOOL DateLyricsStartMarquee(_UIAnimatingLabel *label, CGFloat overflow, N
     return YES;
 }
 
+// Opacity of unsung text, shared by the attributed-string and sweep highlighters.
+static const CGFloat kDateLyricsDimmedAlpha = 0.35;
+
+static DateLyricsSweepVoice *DateLyricsMakeSweepVoice(CALayer *root) {
+    DateLyricsSweepVoice *voice = [DateLyricsSweepVoice new];
+    voice.clip = [CALayer layer];
+    voice.clip.masksToBounds = YES;
+    voice.bar = [CAGradientLayer layer];
+    voice.bar.startPoint = CGPointMake(0.0, 0.5);
+    voice.bar.endPoint = CGPointMake(1.0, 0.5);
+    voice.bar.colors = @[(id)UIColor.whiteColor.CGColor,
+                         (id)UIColor.whiteColor.CGColor,
+                         (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor];
+    voice.bar.anchorPoint = CGPointMake(1.0, 0.5);
+    voice.bar.contentsScale = UIScreen.mainScreen.scale;
+    [voice.clip addSublayer:voice.bar];
+    [root addSublayer:voice.clip];
+    return voice;
+}
+
+static void DateLyricsRemoveSweepMask(UILabel *label) {
+    DateLyricsSweepMask *mask = objc_getAssociatedObject(label, kDateLyricsSweepMaskKey);
+    if (!mask) return;
+    if (label.layer.mask == mask.root) label.layer.mask = nil;
+    objc_setAssociatedObject(label, kDateLyricsSweepMaskKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+// Call inside a CATransaction with actions disabled.
+static void DateLyricsApplySweepVoiceTiming(DateLyricsSweepVoice *voice) {
+    CAGradientLayer *bar = voice.bar;
+    [bar removeAnimationForKey:@"DateLyricsSweep"];
+    voice.clip.hidden = !voice.active;
+    if (!voice.active) return;
+
+    // With the screen off (Always-On) nothing animates: the syllable is held
+    // fully lit, which is exactly the classic word-by-word look.
+    NSTimeInterval duration = voice.end - voice.begin;
+    NSTimeInterval songTime = 0.0;
+    float rate = 0.0f;
+    BOOL timed = duration > 0.0 && !gDateLyricsScreenOff && DateLyricsSweepSongTime(&songTime, &rate);
+    CGFloat progress = timed ? (CGFloat)MIN(MAX((songTime - voice.begin) / duration, 0.0), 1.0) : 1.0;
+    CGFloat y = bar.position.y;
+    CGFloat currentX = voice.fromX + (voice.toX - voice.fromX) * progress;
+    if (!timed || rate <= 0.0f || progress >= 1.0) {
+        bar.position = CGPointMake(currentX, y);
+        return;
+    }
+
+    // The model holds the end state; the animation covers what is left of it.
+    bar.position = CGPointMake(voice.toX, y);
+    CABasicAnimation *sweep = [CABasicAnimation animationWithKeyPath:@"position.x"];
+    sweep.fromValue = @(currentX);
+    sweep.toValue = @(voice.toX);
+    sweep.duration = (voice.end - MAX(songTime, voice.begin)) / rate;
+    NSTimeInterval delay = MAX(0.0, voice.begin - songTime) / rate;
+    if (delay > 0.0) {
+        sweep.beginTime = CACurrentMediaTime() + delay;
+        sweep.fillMode = kCAFillModeBackwards;
+    }
+    sweep.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];
+    // The sweep runs for as long as lyrics are sung; at 30 fps it still reads
+    // as continuous, and ProMotion displays are not held at 120 Hz for it.
+    sweep.preferredFrameRateRange = CAFrameRateRangeMake(30.0, 30.0, 30.0);
+    [bar addAnimation:sweep forKey:@"DateLyricsSweep"];
+}
+
+static void DateLyricsLayoutSweepMask(UILabel *label, NSDictionary *payload, NSString *text) {
+    CGRect bounds = label.bounds;
+    UIFont *font = label.font;
+    NSUInteger length = text.length;
+    if (length == 0 || ![font isKindOfClass:UIFont.class]) return;
+
+    DateLyricsSweepMask *mask = objc_getAssociatedObject(label, kDateLyricsSweepMaskKey);
+    if (!mask) {
+        mask = [DateLyricsSweepMask new];
+        mask.root = [CALayer layer];
+        mask.dim = [CALayer layer];
+        [mask.root addSublayer:mask.dim];
+        mask.foreground = DateLyricsMakeSweepVoice(mask.root);
+        mask.background = DateLyricsMakeSweepVoice(mask.root);
+        objc_setAssociatedObject(label, kDateLyricsSweepMaskKey, mask, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    mask.payload = payload;
+    mask.text = text;
+    mask.boundsSize = bounds.size;
+    // Not laid out yet: the resize that follows lays the mask out.
+    if (CGRectGetWidth(bounds) <= 1.0 || CGRectGetHeight(bounds) <= 1.0) return;
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    // Reproduce UILabel's single-line placement: advance widths, shrunk when
+    // the label scales text to fit, then aligned within the bounds.
+    NSDictionary *attributes = @{ NSFontAttributeName: font };
+    CGFloat (^advance)(NSUInteger) = ^CGFloat(NSUInteger index) {
+        if (index == 0) return 0.0;
+        return [[text substringToIndex:MIN(index, length)] sizeWithAttributes:attributes].width;
+    };
+    CGFloat boundsWidth = CGRectGetWidth(bounds);
+    CGFloat textWidth = advance(length);
+    CGFloat scale = 1.0;
+    if (label.adjustsFontSizeToFitWidth && textWidth > boundsWidth) {
+        scale = MAX(label.minimumScaleFactor, boundsWidth / textWidth);
+    }
+    CGFloat drawnWidth = textWidth * scale;
+    CGFloat originX = CGRectGetMinX(bounds);
+    if (drawnWidth < boundsWidth) {
+        if (label.textAlignment == NSTextAlignmentCenter) originX += (boundsWidth - drawnWidth) / 2.0;
+        else if (label.textAlignment == NSTextAlignmentRight) originX += boundsWidth - drawnWidth;
+    }
+    CGFloat feather = MAX(6.0, round(font.pointSize * scale * 0.6));
+
+    CGRect rootFrame = CGRectInset(bounds, -2.0 * feather, -CGRectGetHeight(bounds));
+    mask.root.frame = rootFrame;
+    mask.dim.frame = mask.root.bounds;
+    CGFloat rootWidth = CGRectGetWidth(rootFrame);
+    CGFloat rootHeight = CGRectGetHeight(rootFrame);
+
+    CGFloat (^xAt)(NSUInteger) = ^CGFloat(NSUInteger index) {
+        return originX + advance(index) * scale - CGRectGetMinX(rootFrame);
+    };
+    // How far a lit run's clip may extend past its text: across adjacent
+    // whitespace (so glyph overhang is kept) but never into a neighbouring
+    // word or syllable, which must stay dim until it is sung.
+    NSCharacterSet *whitespace = NSCharacterSet.whitespaceCharacterSet;
+    CGFloat (^slackAfter)(NSUInteger) = ^CGFloat(NSUInteger index) {
+        NSUInteger next = index;
+        while (next < length && [whitespace characterIsMember:[text characterAtIndex:next]]) next++;
+        if (next >= length) return feather;
+        return MIN(feather, (advance(next) - advance(index)) * scale);
+    };
+    CGFloat (^slackBefore)(NSUInteger) = ^CGFloat(NSUInteger index) {
+        NSUInteger previous = index;
+        while (previous > 0 && [whitespace characterIsMember:[text characterAtIndex:previous - 1]]) previous--;
+        if (previous == 0) return feather;
+        return MIN(feather, (advance(index) - advance(previous)) * scale);
+    };
+
+    BOOL finished = [payload[@"finished"] boolValue];
+    BOOL started = payload[@"started"] ? [payload[@"started"] boolValue] : YES;
+    mask.dim.backgroundColor = [UIColor colorWithWhite:1.0 alpha:finished ? 1.0 : kDateLyricsDimmedAlpha].CGColor;
+
+    void (^layoutVoice)(DateLyricsSweepVoice *, NSString *, NSString *) =
+        ^(DateLyricsSweepVoice *voice, NSString *litPrefix, NSString *sweepPrefix) {
+        NSRange lit = DateLyricsRangeFromPayload(payload, litPrefix, length);
+        voice.active = started && !finished && lit.location != NSNotFound;
+        if (!voice.active) return;
+
+        NSRange sweep = DateLyricsRangeFromPayload(payload, sweepPrefix, length);
+        NSNumber *begin = payload[[sweepPrefix stringByAppendingString:@"Begin"]];
+        NSNumber *end = payload[[sweepPrefix stringByAppendingString:@"End"]];
+        // Only a syllable at the leading edge of the lit run is animated;
+        // anything else is drawn as the lit run alone.
+        BOOL animated = sweep.location != NSNotFound && sweep.location >= lit.location &&
+            NSMaxRange(sweep) == NSMaxRange(lit) &&
+            [begin isKindOfClass:NSNumber.class] && [end isKindOfClass:NSNumber.class];
+
+        NSUInteger litEnd = NSMaxRange(lit);
+        CGFloat clipLeft = xAt(lit.location) - slackBefore(lit.location);
+        CGFloat clipRight = xAt(litEnd) + slackAfter(litEnd);
+        voice.clip.frame = CGRectMake(clipLeft, 0.0, MAX(0.0, clipRight - clipLeft), rootHeight);
+        CGFloat barLength = rootWidth + 2.0 * feather;
+        voice.bar.bounds = CGRectMake(0.0, 0.0, barLength, rootHeight);
+        voice.bar.locations = @[@0.0, @((barLength - feather) / barLength), @1.0];
+        voice.bar.position = CGPointMake(voice.bar.position.x, rootHeight / 2.0);
+
+        // The soft edge enters at the syllable's first glyph and finishes a
+        // feather past its last, where the clip has already cut it off.
+        voice.toX = xAt(litEnd) + feather - clipLeft;
+        if (animated) {
+            voice.fromX = xAt(sweep.location) - clipLeft;
+            voice.begin = begin.doubleValue;
+            voice.end = end.doubleValue;
+        } else {
+            voice.fromX = voice.toX;
+            voice.begin = 0.0;
+            voice.end = 0.0;
+        }
+    };
+    layoutVoice(mask.foreground, @"", @"sweep");
+    layoutVoice(mask.background, @"bg", @"bgSweep");
+    DateLyricsApplySweepVoiceTiming(mask.foreground);
+    DateLyricsApplySweepVoiceTiming(mask.background);
+
+    if (label.layer.mask != mask.root) label.layer.mask = mask.root;
+    [CATransaction commit];
+}
+
+static void DateLyricsSweepResyncLabel(UILabel *label) {
+    DateLyricsSweepMask *mask = objc_getAssociatedObject(label, kDateLyricsSweepMaskKey);
+    if (!mask) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    DateLyricsApplySweepVoiceTiming(mask.foreground);
+    DateLyricsApplySweepVoiceTiming(mask.background);
+    [CATransaction commit];
+}
+
+static void DateLyricsSweepResyncAllLabels(void) {
+    for (CSProminentSubtitleDateView *dateView in gDateLyricsDateViews) {
+        if (![dateView isKindOfClass:UIView.class]) continue;
+        _UIAnimatingLabel *label = DateLyricsFindAnimatingLabel(dateView);
+        if (label) DateLyricsSweepResyncLabel(label);
+    }
+}
+
+// The mask is laid out in the label's own coordinates, so any later resize
+// (a transition releasing its pinned frame, a date view relayout) re-runs it.
+static void DateLyricsSweepRelayoutIfResized(UILabel *label) {
+    DateLyricsSweepMask *mask = objc_getAssociatedObject(label, kDateLyricsSweepMaskKey);
+    if (!mask || CGSizeEqualToSize(mask.boundsSize, label.bounds.size)) return;
+    DateLyricsLayoutSweepMask(label, mask.payload, mask.text);
+}
+
 static NSString *GetLyricsRootPath(void) {
     static NSString *cachedSpringBoardPath = nil;
     if (DateLyricsIsSpringBoardHost()) {
@@ -2059,16 +2144,6 @@ static void DateLyricsWriteRuntimeStatus(void) {
         [data writeToFile:[GetLyricsRootPath() stringByAppendingPathComponent:@"runtime-status.json"] atomically:YES];
     }
 }
-
-@interface DateLyricsWordTTMLParserDelegate : NSObject <NSXMLParserDelegate>
-@property (nonatomic, strong) NSMutableArray<DateLyricsTimedLine *> *lines;
-@property (nonatomic, strong) DateLyricsTimedLine *currentLine;
-@property (nonatomic, strong) NSMutableArray<DateLyricsTimedWord *> *currentWords;
-@property (nonatomic, strong) NSMutableString *pendingSeparator;
-@property (nonatomic, strong) NSMutableString *currentSpanText;
-@property (nonatomic, assign) BOOL insideParagraph;
-@property (nonatomic, strong) NSMutableArray<NSNumber *> *spanBackgroundStack;
-@end
 
 @implementation DateLyricsWordTTMLParserDelegate
 
@@ -2664,9 +2739,6 @@ static BOOL DateLyricsMusixmatchTrackIsTrusted(NSDictionary *track, DateLyricsMu
     if (difference != DBL_MAX && difference > 15.0) return NO;
     return (titleMatches && artistMatches) || (difference <= 4.0 && (titleMatches || artistMatches));
 }
-
-static void DateLyricsMusixmatchFetchMacro(DateLyricsMusixmatchTask *task);
-static void DateLyricsMusixmatchBeginTokenLoad(NSUInteger attempt);
 
 static void DateLyricsMusixmatchFinishTokenLoad(NSString *token, NSString *reason) {
     gMusixmatchTokenRequestInFlight = NO;
@@ -3358,7 +3430,6 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
     return et;
 }
 
-
 static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float rate, BOOL isSeek) {
     if (storeID <= 0) return;
     NSMutableDictionary *anchor = [NSMutableDictionary dictionary];
@@ -3657,6 +3728,8 @@ static void DateLyricsResetHybridVisibilityIfNeeded(CSProminentSubtitleDateView 
 
 static void DateLyricsRestoreSystemDateLabel(_UIAnimatingLabel *label) {
     if (![label isKindOfClass:UILabel.class]) return;
+    // Never leave the stock date drawn through a lyric mask.
+    DateLyricsRemoveSweepMask(label);
     UIView *outgoingSnapshot = objc_getAssociatedObject(label, kDateLyricsOutgoingSnapshotKey);
     [outgoingSnapshot removeFromSuperview];
     objc_setAssociatedObject(label, kDateLyricsOutgoingSnapshotKey, nil, OBJC_ASSOCIATION_ASSIGN);
@@ -3942,8 +4015,11 @@ static void DateLyricsSyncArtworkExpandedState(CSCoverSheetViewController *cover
 
 static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff, NSString *reason) {
     BOOL wasLive = DateLyricsLockScreenLive();
+    BOOL screenOffChanged = gDateLyricsScreenOff != screenOff;
     gDateLyricsCoverSheetVisible = coverSheetVisible;
     gDateLyricsScreenOff = screenOff;
+    // Always-On: freeze sweeps fully lit while the screen is off, resume after.
+    if (screenOffChanged && gDateLyricsSmoothSweep) DateLyricsSweepResyncAllLabels();
     BOOL live = DateLyricsLockScreenLive();
     if (live == wasLive) return;
 
@@ -4003,6 +4079,12 @@ static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff,
     UIView *outgoingSnapshot = objc_getAssociatedObject(self, kDateLyricsOutgoingSnapshotKey);
     [outgoingSnapshot removeFromSuperview];
     objc_setAssociatedObject(self, kDateLyricsOutgoingSnapshotKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    if (![objc_getAssociatedObject(self, kDateLyricsIsDateLabelKey) boolValue]) return;
+    DateLyricsSweepRelayoutIfResized(self);
 }
 
 - (void)setText:(NSString *)text {
@@ -4170,6 +4252,9 @@ static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff,
         _textOverflows = _marqueeContainerWidth > 0 &&
             (_marqueeTextWidth * allowedScale) > _marqueeContainerWidth + 0.5f;
     }
+    // The marquee scrolls a copy of the attributed text, which the mask on
+    // this label would not cover; such lines keep the classic highlight.
+    BOOL sweepEnabled = gDateLyricsSmoothSweep && gDateLyricsWordHighlighting && hasWordTiming && !_textOverflows;
     if (gDateLyricsWordHighlighting && hasWordTiming) {
         NSMutableAttributedString *mAttrStr = [[NSMutableAttributedString alloc] initWithString:lyric];
         
@@ -4195,10 +4280,11 @@ static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff,
 
         // Opacity is the sole highlight style: dim upcoming syllables and retain
         // the normal colour for the spoken portion of the line.
-        UIColor *dimmedColor = [textColor colorWithAlphaComponent:0.35];
+        UIColor *dimmedColor = [textColor colorWithAlphaComponent:kDateLyricsDimmedAlpha];
         BOOL finished = [renderPayload[@"finished"] boolValue];
         BOOL started = renderPayload[@"started"] ? [renderPayload[@"started"] boolValue] : YES;
-        if (finished) {
+        if (finished || sweepEnabled) {
+            // A sweep line is dimmed by its mask, not by glyph colour.
             [mAttrStr addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, lyric.length)];
         } else if (!started) {
             [mAttrStr addAttribute:NSForegroundColorAttributeName value:dimmedColor range:NSMakeRange(0, lyric.length)];
@@ -4289,7 +4375,9 @@ static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff,
         NSString *lastText = objc_getAssociatedObject(self, kDateLyricsLastRenderedTextKey);
         contentChanged = lastText == nil || ![lastText isEqualToString:displayText];
     }
-    contentChanged = contentChanged || sizingChanged;
+    // A sweep line's attributed text is constant, so a repeated line ("na na
+    // na") would otherwise compare equal and skip its transition.
+    contentChanged = contentChanged || sizingChanged || (sweepEnabled && lineChanged);
 
     // A different line must not replace an active transition. A real-world
     // example is Minibar's caviar ->
@@ -4342,6 +4430,13 @@ static void DateLyricsSetLockScreenState(BOOL coverSheetVisible, BOOL screenOff,
         } else {
             DateLyricsApplyLabelContent(self, displayText, attrDisplayText);
         }
+    }
+    // After any transition has snapshotted the outgoing line and pinned the
+    // frame, so the mask is laid out for the bounds the new line is shown in.
+    if (sweepEnabled) {
+        DateLyricsLayoutSweepMask(self, renderPayload, displayText);
+    } else {
+        DateLyricsRemoveSweepMask(self);
     }
     DateLyricsRefreshMarqueeContent(self);
 
@@ -4461,7 +4556,6 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
             return defaultVal;
         };
 
-
         gDateLyricsEnabled = getPrefBool(@"Enabled", YES);
         gDateLyricsOnlyExpandedArtwork = getPrefBool(@"OnlyExpandedArtwork", NO);
         gDateLyricsInterludeIndicator = getPrefBool(@"InterludeIndicator", NO);
@@ -4474,6 +4568,7 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         gDateLyricsHapticStyleLine = getPrefInteger(@"HapticStyleLine", 2);
         gDateLyricsUseCustomFont = getPrefBool(@"UseCustomFont", NO);
         gDateLyricsCustomFontName = getPrefString(@"CustomFontName", nil);
+        gDateLyricsItalicLyrics = getPrefBool(@"ItalicLyrics", NO);
         gDateLyricsTransitionsEnabled = getPrefBool(@"TransitionsEnabled", YES);
         
         NSInteger transitionStyle = getPrefInteger(@"TransitionStyle", DateLyricsTransitionStyleSlideUp);
@@ -4494,6 +4589,9 @@ static void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer
         gDateLyricsMarqueeEnabled = getPrefBool(@"MarqueeEnabled", YES);
         gDateLyricsMusixmatchEnabled = getPrefBool(@"MusixmatchEnabled", YES);
         gDateLyricsDebugLogging = getPrefBool(@"DebugLogging", NO);
+        BOOL smoothSweep = getPrefBool(@"SmoothWordSweep", NO);
+        if (smoothSweep != gDateLyricsSmoothSweep) gDateLyricsSweepClockValid = NO;
+        gDateLyricsSmoothSweep = smoothSweep;
         gDateLyricsRenderGeneration++;
 
         if (!gDateLyricsMusixmatchEnabled && gLyricsQueue) {
@@ -4591,7 +4689,6 @@ static void DateLyricsClearCaches(CFNotificationCenterRef center, void *observer
         });
     }
 }
-
 
 static void DateLyricsHandleAnchorChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     // Darwin callbacks do not promise the main thread.  The renderer, resolver
@@ -4729,7 +4826,6 @@ static void DateLyricsHandleAnchorRequest(CFNotificationCenterRef center, void *
         
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsHandleAnchorChanged, CFSTR("com.shalamand3r.datelyrics/anchor.changed"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsHandleScoreChanged, CFSTR("com.shalamand3r.datelyrics/score.changed"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-
 
         // Option A: Ask Music for an anchor on launch.
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFSTR("com.shalamand3r.datelyrics/anchor.request"), NULL, NULL, YES);

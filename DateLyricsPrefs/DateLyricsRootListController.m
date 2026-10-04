@@ -235,6 +235,23 @@ static NSString *DateLyricsRecentLogText(NSString *text) {
 
 @end
 
+// Mirrors DateLyricsItalicFont in the tweak: real italic face first, synthetic slant otherwise.
+static UIFont *DateLyricsItalicFont(UIFont *font) {
+	if (![font isKindOfClass:UIFont.class]) return font;
+	UIFontDescriptor *descriptor = font.fontDescriptor;
+	UIFontDescriptorSymbolicTraits traits = descriptor.symbolicTraits;
+	if (traits & UIFontDescriptorTraitItalic) return font;
+
+	UIFontDescriptor *italicDescriptor = [descriptor fontDescriptorWithSymbolicTraits:traits | UIFontDescriptorTraitItalic];
+	if (italicDescriptor) {
+		UIFont *candidate = [UIFont fontWithDescriptor:italicDescriptor size:font.pointSize];
+		if (candidate.fontDescriptor.symbolicTraits & UIFontDescriptorTraitItalic) return candidate;
+	}
+
+	CGAffineTransform slant = CGAffineTransformMake(1.0, 0.0, tan(12.0 * M_PI / 180.0), 1.0, 0.0, 0.0);
+	return [UIFont fontWithDescriptor:[descriptor fontDescriptorWithMatrix:slant] size:font.pointSize] ?: font;
+}
+
 static NSArray<NSDictionary<NSString *, NSString *> *> *DateLyricsFontOptions(void) {
 	static NSArray<NSDictionary<NSString *, NSString *> *> *cachedOptions = nil;
 	static dispatch_once_t onceToken;
@@ -297,6 +314,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
         values[@"ForceLowercase"] = @([prefs boolForKey:@"ForceLowercase"]);
         values[@"WordHighlighting"] = @([prefs objectForKey:@"WordHighlighting"] ? [prefs boolForKey:@"WordHighlighting"] : YES);
         values[@"UseCustomFont"] = @([prefs boolForKey:@"UseCustomFont"]);
+        values[@"ItalicLyrics"] = @([prefs boolForKey:@"ItalicLyrics"]);
         values[@"TransitionsEnabled"] = @([prefs objectForKey:@"TransitionsEnabled"] ? [prefs boolForKey:@"TransitionsEnabled"] : YES);
         values[@"TransitionStyle"] = @([prefs objectForKey:@"TransitionStyle"] ? (NSInteger)[prefs integerForKey:@"TransitionStyle"] : 1);
         id transDuration = [prefs objectForKey:@"TransitionDuration"];
@@ -374,6 +392,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 UIFont *customFont = [UIFont fontWithName:fontName size:20.0];
                 if (customFont) font = customFont;
         }
+        if ([prefs[@"ItalicLyrics"] boolValue]) font = DateLyricsItalicFont(font);
 
         CGFloat maxWidth = CGRectGetWidth(self.mainPreviewLabel.bounds);
         if (maxWidth <= 1.0) {
@@ -736,6 +755,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
                 UIFont *customFont = [UIFont fontWithName:fontName size:20.0];
                 if (customFont) font = customFont;
         }
+        if ([prefs[@"ItalicLyrics"] boolValue]) font = DateLyricsItalicFont(font);
 
         if (splitLongLines && baseText.length > 0 && wordRanges.count >= 2) {
                 CGFloat maxWidth = CGRectGetWidth(self.mainPreviewLabel.bounds);
@@ -1031,10 +1051,12 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"HapticStyleLine", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"UseCustomFont", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"CustomFontName", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"ItalicLyrics", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MinimumScale", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"DebugLogging", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MusixmatchEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"SmoothWordSweep", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionDuration", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
@@ -1191,6 +1213,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 	NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:baseText];
 	NSString *fontName = [self amlSelectedFontName];
 	UIFont *font = [UIFont fontWithName:fontName size:20.0] ?: [UIFont systemFontOfSize:20.0 weight:UIFontWeightSemibold];
+	if ([prefs[@"ItalicLyrics"] boolValue]) font = DateLyricsItalicFont(font);
 	[attributed addAttribute:NSFontAttributeName value:font range:NSMakeRange(0, attributed.length)];
 	[attributed addAttribute:NSForegroundColorAttributeName value:[UIColor labelColor] range:NSMakeRange(0, attributed.length)];
 	[attributed addAttribute:NSStrokeWidthAttributeName value:@0 range:NSMakeRange(0, attributed.length)];

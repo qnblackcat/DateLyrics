@@ -9,6 +9,34 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>Smooth Word Sweep</string>
+			<key>footerText</key>
+			<string>Light each syllable gradually over its sung duration, like Apple Music, instead of all at once. Needs Word Highlighting and syllable-synced lyrics. Pauses while the screen is off (Always-On).</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>SmoothWordSweep</string>
+			<key>label</key>
+			<string>Smooth Word Sweep</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>text.line.first.and.arrowtriangle.forward</string>
+			</dict>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>Musixmatch Fallback</string>
 			<key>footerText</key>
 			<string>Apple Music lyrics remain first priority. Musixmatch fills missing timed lyrics and may upgrade Apple line-sync to word-sync when available. This unofficial service may change or rate-limit.</string>
