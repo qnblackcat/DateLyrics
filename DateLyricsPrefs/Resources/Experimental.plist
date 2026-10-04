@@ -11,7 +11,9 @@
 			<key>label</key>
 			<string>Smooth Word Sweep</string>
 			<key>footerText</key>
-			<string>Light each syllable gradually over its sung duration, like Apple Music, instead of all at once. Needs Word Highlighting and syllable-synced lyrics. Pauses while the screen is off (Always-On).</string>
+			<string>Light each syllable gradually over its sung duration, like Apple Music, instead of all at once. Needs Word Highlighting and syllable-synced lyrics. Pauses while the screen is off (Always-On).
+
+Uses more battery and GPU: the Lock Screen redraws the lyric continuously (30 fps, masked) while a line is sung, instead of only when a syllable changes. Turn it off if you notice lag or faster battery drain.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

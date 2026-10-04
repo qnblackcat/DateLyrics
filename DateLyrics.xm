@@ -678,6 +678,33 @@ static BOOL DateLyricsSweepSongTime(NSTimeInterval *songTimeOut, float *rateOut)
     return YES;
 }
 
+// When the current pause began, on the monotonic clock. A paused anchor is
+// re-resolved every time the lock screen reappears, and Music keeps republishing
+// the same paused position; measuring the hide delay from here stops either one
+// from bringing back a lyric whose pause already timed out (for example after
+// another app has taken over playback).
+static NSTimeInterval gDateLyricsPausedSince = -1.0;
+
+static void DateLyricsNotePauseState(NSDictionary *previousAnchor, NSDictionary *anchor) {
+    if ([anchor[@"rate"] floatValue] > 0.0f) {
+        gDateLyricsPausedSince = -1.0;
+        return;
+    }
+    // A paused scrub or a different track starts a fresh pause so the new
+    // position is shown for the full timeout.
+    BOOL samePause = gDateLyricsPausedSince >= 0.0 && previousAnchor &&
+        [previousAnchor[@"rate"] floatValue] <= 0.0f &&
+        [previousAnchor[@"trackId"] isEqual:anchor[@"trackId"]] &&
+        fabs([previousAnchor[@"elapsed"] doubleValue] - [anchor[@"elapsed"] doubleValue]) <= 0.05;
+    if (!samePause) gDateLyricsPausedSince = DateLyricsMonotonicTime();
+}
+
+static NSTimeInterval DateLyricsPauseHideRemaining(void) {
+    NSTimeInterval timeout = MAX(0.0, gDateLyricsPauseTimeout);
+    if (gDateLyricsPausedSince < 0.0) return timeout;
+    return timeout - (DateLyricsMonotonicTime() - gDateLyricsPausedSince);
+}
+
 static void DateLyricsCancelPauseHideTimer(void) {
     if (gDateLyricsPauseHideTimer) {
         dispatch_source_cancel(gDateLyricsPauseHideTimer);
@@ -696,7 +723,7 @@ static void DateLyricsSchedulePauseHideTimer(void) {
     // MediaRemote refreshes the same zero-rate position.
     if (gDateLyricsPauseHideTimer) return;
 
-    NSTimeInterval delay = MAX(0.0, gDateLyricsPauseTimeout);
+    NSTimeInterval delay = DateLyricsPauseHideRemaining();
     if (delay <= 0.0) {
         gDateLyricsCurrentPayload = nil;
         gDateLyricsRenderGeneration++;
@@ -880,6 +907,12 @@ static void DateLyricsScheduleTicker(void) {
                                    nextLineTrigger, kDateLyricsLineTransitionLead * 1000.0, currentElapsed);
             }
         }
+    }
+
+    // The pause already outlived its timeout: keep the date rather than
+    // flashing the paused line for another full timeout.
+    if (rate <= 0.0f && DateLyricsPauseHideRemaining() <= 0.0) {
+        payload = nil;
     }
 
     DateLyricsDebugLog(@"[Ticker] elapsed=%.2f text='%@' range=[%@, %@] nextTrigger=%.3f nextLine=%.3f early=%d",
@@ -4705,6 +4738,7 @@ static void DateLyricsHandleAnchorChanged(CFNotificationCenterRef center, void *
             return;
         }
 
+        DateLyricsNotePauseState(gDateLyricsLocalAnchor, anchor);
         gDateLyricsLocalAnchor = anchor;
         NSInteger trackId = [anchor[@"trackId"] integerValue];
         DateLyricsDebugLog(@"[SB] Received anchor: trackId=%ld elapsed=%.2f rate=%.2f", (long)trackId, [anchor[@"elapsed"] doubleValue], [anchor[@"rate"] floatValue]);
