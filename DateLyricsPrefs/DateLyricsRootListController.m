@@ -164,9 +164,14 @@ static NSArray<NSString *> *DateLyricsDebugLogPaths(void) {
     if (![paths containsObject:jbrootPath]) [paths addObject:jbrootPath];
     Class proxyClass = NSClassFromString(@"LSApplicationProxy");
     if ([proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
-        id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:@"com.apple.Music"];
-        NSURL *containerURL = [proxy respondsToSelector:@selector(dataContainerURL)] ? [proxy performSelector:@selector(dataContainerURL)] : nil;
-        if (containerURL.path.length > 0) [paths addObject:[containerURL.path stringByAppendingPathComponent:@"Library/DateLyrics/tweak-debug.log"]];
+        for (NSString *bundleIdentifier in @[@"com.apple.Music", @"com.google.ios.youtubemusic"]) {
+            id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleIdentifier];
+            NSURL *containerURL = [proxy respondsToSelector:@selector(dataContainerURL)] ? [proxy performSelector:@selector(dataContainerURL)] : nil;
+            if (containerURL.path.length > 0) {
+                NSString *logPath = [containerURL.path stringByAppendingPathComponent:@"Library/DateLyrics/tweak-debug.log"];
+                if (![paths containsObject:logPath]) [paths addObject:logPath];
+            }
+        }
     }
     return paths;
 }

@@ -1,1 +1,1 @@
-{ Filter = { Bundles = ( "com.apple.Music", "com.apple.springboard" ); }; }
+{ Filter = { Bundles = ( "com.apple.Music", "com.google.ios.youtubemusic", "com.apple.springboard" ); }; }
