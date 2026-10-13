@@ -164,9 +164,14 @@ static NSArray<NSString *> *DateLyricsDebugLogPaths(void) {
     if (![paths containsObject:jbrootPath]) [paths addObject:jbrootPath];
     Class proxyClass = NSClassFromString(@"LSApplicationProxy");
     if ([proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
-        id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:@"com.apple.Music"];
-        NSURL *containerURL = [proxy respondsToSelector:@selector(dataContainerURL)] ? [proxy performSelector:@selector(dataContainerURL)] : nil;
-        if (containerURL.path.length > 0) [paths addObject:[containerURL.path stringByAppendingPathComponent:@"Library/DateLyrics/tweak-debug.log"]];
+        for (NSString *bundleIdentifier in @[@"com.apple.Music", @"com.google.ios.youtubemusic"]) {
+            id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleIdentifier];
+            NSURL *containerURL = [proxy respondsToSelector:@selector(dataContainerURL)] ? [proxy performSelector:@selector(dataContainerURL)] : nil;
+            if (containerURL.path.length > 0) {
+                NSString *logPath = [containerURL.path stringByAppendingPathComponent:@"Library/DateLyrics/tweak-debug.log"];
+                if (![paths containsObject:logPath]) [paths addObject:logPath];
+            }
+        }
     }
     return paths;
 }
@@ -1056,6 +1061,7 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
     CFPreferencesSetAppValue((__bridge CFStringRef)@"DebugLogging", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"PauseTimeout", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"MusixmatchEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
+    CFPreferencesSetAppValue((__bridge CFStringRef)@"YouTubeMusicSupport", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"SmoothWordSweep", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionsEnabled", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
     CFPreferencesSetAppValue((__bridge CFStringRef)@"TransitionStyle", NULL, (__bridge CFStringRef)kDateLyricsPrefsSuite);
@@ -1456,11 +1462,34 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 @end
 
 @implementation DateLyricsExperimentalListController
+// Switches whose explanatory footer is only shown while the switch is on.
+static NSArray<NSString *> *DateLyricsFooterOnWhenEnabledKeys(void) {
+    return @[@"SmoothWordSweep", @"YouTubeMusicSupport"];
+}
+
 - (NSArray *)specifiers {
 	if (!_specifiers) {
 		_specifiers = [self loadSpecifiersFromPlistName:@"Experimental" target:self];
+		NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
+		for (NSUInteger i = 1; i < _specifiers.count; i++) {
+			PSSpecifier *specifier = _specifiers[i];
+			NSString *key = [specifier propertyForKey:@"key"];
+			if (![DateLyricsFooterOnWhenEnabledKeys() containsObject:key] || [prefs boolForKey:key]) continue;
+			PSSpecifier *group = _specifiers[i - 1];
+			if ([[group propertyForKey:@"cell"] isEqual:@"PSGroupCell"] || group.cellType == PSGroupCell) {
+				[group.properties removeObjectForKey:@"footerText"];
+			}
+		}
 	}
 	return _specifiers;
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+	[super setPreferenceValue:value specifier:specifier];
+	if ([DateLyricsFooterOnWhenEnabledKeys() containsObject:[specifier propertyForKey:@"key"]]) {
+		_specifiers = nil;
+		[self reloadSpecifiers];
+	}
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

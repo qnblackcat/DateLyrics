@@ -1,11 +1,11 @@
 TARGET := iphone:clang:16.5:16.0
-THEOS_PACKAGE_SCHEME ?= rootless
-INSTALL_TARGET_PROCESSES = Music SpringBoard
+
+INSTALL_TARGET_PROCESSES = Music YouTubeMusic
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = DateLyrics
-DateLyrics_FILES = DateLyrics.xm
+DateLyrics_FILES = $(wildcard *.x *.xm *.m)
 DateLyrics_CFLAGS = -fobjc-arc
 
 SUBPROJECTS = DateLyricsPrefs
