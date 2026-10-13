@@ -79,6 +79,7 @@ void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer, CFStr
         gDateLyricsMarqueeEnabled = getPrefBool(@"MarqueeEnabled", YES);
         gDateLyricsMusixmatchEnabled = getPrefBool(@"MusixmatchEnabled", YES);
         gDateLyricsDebugLogging = getPrefBool(@"DebugLogging", NO);
+        gDateLyricsYouTubeMusicSupport = getPrefBool(@"YouTubeMusicSupport", NO);
         BOOL smoothSweep = getPrefBool(@"SmoothWordSweep", NO);
         if (smoothSweep != gDateLyricsSmoothSweep) gDateLyricsSweepClockValid = NO;
         gDateLyricsSmoothSweep = smoothSweep;
@@ -103,6 +104,17 @@ void DateLyricsReloadPrefs(CFNotificationCenterRef center, void *observer, CFStr
 
         if (DateLyricsIsSpringBoardHost() && !gDateLyricsMusixmatchEnabled &&
             [gDateLyricsCurrentScore.source hasPrefix:@"musixmatch"]) {
+            gDateLyricsCurrentScore = nil;
+            gDateLyricsCurrentPayload = nil;
+            gDateLyricsResolverCursor = -1;
+            DateLyricsClearEarlyLinePreview();
+            gDateLyricsRenderGeneration++;
+            DateLyricsApplyCurrentLineToAllCoverSheets();
+        }
+
+        if (DateLyricsIsSpringBoardHost() && !gDateLyricsYouTubeMusicSupport &&
+            [gDateLyricsLocalAnchor[@"bundleIdentifier"] isEqualToString:@"com.google.ios.youtubemusic"]) {
+            gDateLyricsLocalAnchor = nil;
             gDateLyricsCurrentScore = nil;
             gDateLyricsCurrentPayload = nil;
             gDateLyricsResolverCursor = -1;
@@ -195,6 +207,7 @@ void DateLyricsHandleAnchorChanged(CFNotificationCenterRef center, void *observe
       // safe mode, so contain anything the stored files or the renderer throw.
       @try {
         if (!gDateLyricsEnabled) return;
+        if (!gDateLyricsYouTubeMusicSupport && [sourceBundleIdentifier isEqualToString:@"com.google.ios.youtubemusic"]) return;
 
         NSString *path = [DateLyricsRootPathForBundleIdentifier(sourceBundleIdentifier) stringByAppendingPathComponent:@"anchor.json"];
         NSData *data = [NSData dataWithContentsOfFile:path];

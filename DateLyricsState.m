@@ -74,6 +74,8 @@ BOOL gDateLyricsShowAdlibs = NO;
 CGFloat gDateLyricsMinimumScale = 0.55;
 NSTimeInterval gDateLyricsPauseTimeout = 2.0;
 BOOL gDateLyricsMusixmatchEnabled = YES;
+// Experimental. Read at launch by YouTube Music (it hooks only when on) and live by SpringBoard.
+BOOL gDateLyricsYouTubeMusicSupport = NO;
 // Keep disk logging opt-in.  The diagnostic path writes asynchronously on every
 // ticker/render event and should never be enabled in a normal install.
 BOOL gDateLyricsDebugLogging = NO;

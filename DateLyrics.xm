@@ -17,6 +17,11 @@
     });
 
     DateLyricsReloadPrefs(NULL, NULL, NULL, NULL, NULL);
+    // Always logged (not gated by Debug Logging): the only way to tell "the tweak
+    // was never loaded here" apart from "it loaded but logging is off".
+    NSLog(@"[DateLyrics] loaded in %@ (host=%s enabled=%d debugLogging=%d ytmSupport=%d)", [NSBundle mainBundle].bundleIdentifier,
+        DateLyricsIsSpringBoardHost() ? "springboard" : (DateLyricsIsMusicHost() ? "music" : (DateLyricsIsYouTubeMusicHost() ? "youtubemusic" : "other")),
+        gDateLyricsEnabled, gDateLyricsDebugLogging, gDateLyricsYouTubeMusicSupport);
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsReloadPrefs, CFSTR("com.shalamand3r.datelyrics/ReloadPrefs"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, DateLyricsClearCaches, CFSTR("com.shalamand3r.datelyrics/ClearCaches"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 
@@ -26,7 +31,7 @@
         DateLyricsInitSpringBoardHooks();
     } else if (DateLyricsIsMusicHost()) {
         DateLyricsInitMusicHooks();
-    } else if (DateLyricsIsYouTubeMusicHost()) {
+    } else if (DateLyricsIsYouTubeMusicHost() && gDateLyricsYouTubeMusicSupport) {
         DateLyricsInitYouTubeMusicHooks();
     }
 }
