@@ -1462,11 +1462,34 @@ static NSDictionary *DateLyricsCurrentPrefs(void) {
 @end
 
 @implementation DateLyricsExperimentalListController
+// Switches whose explanatory footer is only shown while the switch is on.
+static NSArray<NSString *> *DateLyricsFooterOnWhenEnabledKeys(void) {
+    return @[@"SmoothWordSweep", @"YouTubeMusicSupport"];
+}
+
 - (NSArray *)specifiers {
 	if (!_specifiers) {
 		_specifiers = [self loadSpecifiersFromPlistName:@"Experimental" target:self];
+		NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:kDateLyricsPrefsSuite];
+		for (NSUInteger i = 1; i < _specifiers.count; i++) {
+			PSSpecifier *specifier = _specifiers[i];
+			NSString *key = [specifier propertyForKey:@"key"];
+			if (![DateLyricsFooterOnWhenEnabledKeys() containsObject:key] || [prefs boolForKey:key]) continue;
+			PSSpecifier *group = _specifiers[i - 1];
+			if ([[group propertyForKey:@"cell"] isEqual:@"PSGroupCell"] || group.cellType == PSGroupCell) {
+				[group.properties removeObjectForKey:@"footerText"];
+			}
+		}
 	}
 	return _specifiers;
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+	[super setPreferenceValue:value specifier:specifier];
+	if ([DateLyricsFooterOnWhenEnabledKeys() containsObject:[specifier propertyForKey:@"key"]]) {
+		_specifiers = nil;
+		[self reloadSpecifiers];
+	}
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
