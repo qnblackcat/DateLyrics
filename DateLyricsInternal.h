@@ -58,6 +58,7 @@ extern BOOL gDateLyricsShowAdlibs;
 extern CGFloat gDateLyricsMinimumScale;
 extern NSTimeInterval gDateLyricsPauseTimeout;
 extern BOOL gDateLyricsMusixmatchEnabled;
+extern BOOL gDateLyricsYouTubeMusicSupport;
 extern BOOL gDateLyricsDebugLogging;
 extern NSTimeInterval gDateLyricsMarqueeHoldDuration;
 extern NSHashTable<UIView *> *gDateLyricsWidgetSlots;

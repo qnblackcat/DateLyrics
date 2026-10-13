@@ -11,9 +11,9 @@
 			<key>label</key>
 			<string>Smooth Word Sweep</string>
 			<key>footerText</key>
-			<string>Light each syllable gradually over its sung duration, like Apple Music, instead of all at once. Needs Word Highlighting and syllable-synced lyrics. Pauses while the screen is off (Always-On).
+			<string>Apple Music only. Lights each syllable gradually over its sung duration, like in the Apple Music app.
 
-Uses more battery and GPU: the Lock Screen redraws the lyric continuously (30 fps, masked) while a line is sung, instead of only when a syllable changes. Turn it off if you notice lag or faster battery drain.</string>
+Redraws the lyric at 30 fps while a line is sung, which uses more battery and GPU. Turn it off if you notice lag or battery drain.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -57,6 +57,39 @@ Uses more battery and GPU: the Lock Screen redraws the lyric continuously (30 fp
 			</dict>
 			<key>default</key>
 			<true/>
+			<key>defaults</key>
+			<string>com.shalamand3r.datelyrics</string>
+			<key>PostNotification</key>
+			<string>com.shalamand3r.datelyrics/ReloadPrefs</string>
+		</dict>
+
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>YouTube Music</string>
+			<key>footerText</key>
+			<string>Unofficial and relies on the app’s internals, so it may break at any time. A respring is required.
+• Tested on YouTube Music v9.41. Newer versions may not work.
+• No word highlighting or sweep (even the stock YouTube Music app can't do this).
+• Lyrics may drift from the music, most visibly on split lines.
+• If lyrics don’t appear for a song, open its Lyrics tab once.
+• Currently no support for Musixmatch Fallback.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>key</key>
+			<string>YouTubeMusicSupport</string>
+			<key>label</key>
+			<string>Enable YouTube Music Support</string>
+			<key>iconImageSystem</key>
+			<dict>
+				<key>name</key>
+				<string>play.rectangle</string>
+			</dict>
+			<key>default</key>
+			<false/>
 			<key>defaults</key>
 			<string>com.shalamand3r.datelyrics</string>
 			<key>PostNotification</key>

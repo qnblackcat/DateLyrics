@@ -210,22 +210,193 @@ static void DLCollectLyricLines(const uint8_t *b, size_t n, int depth, NSMutable
     if (candidates.count > (*best).count) *best = candidates;
 }
 
-static void DateLyricsYTMTryExtractTimedLyrics(NSData *data) {
-    if (![data isKindOfClass:NSData.class] || data.length < 2000 || !DateLyricsIsYouTubeMusicHost() || !gDateLyricsEnabled) return;
+// ---- Prefetching the lyrics panel --------------------------------------------
+// Opening the Lyrics tab sends one request through the app's own panel service:
+//   YTIPanelRequest { panel_id: "PAmusic_watch_lyrics_panel", params: <28 chars> }
+// The params (base64 of a tiny protobuf holding a per-song "t_…" id) are already
+// present in the data the app loads when a song starts, so the same request can
+// be sent early, through the same service, without the tab ever being opened.
+// Set to NO to fall back to "lyrics appear once the tab has been opened".
+static const BOOL kDateLyricsYouTubeMusicPrefetch = YES;
+static __weak id gDateLyricsYTMPanelService = nil;
+// The service is created lazily by the panel view controllers, so before the tab
+// has ever been opened there may be none to borrow. Keep an account id captured
+// from the app's own objects and build a private service from it instead.
+static id gDateLyricsYTMAccountID = nil;
+static id gDateLyricsYTMOwnedPanelService = nil;
+
+static void DateLyricsYTMPrefetchLyricsForParams(NSString *params) {
+    static NSMutableSet<NSString *> *requested = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ requested = [NSMutableSet set]; });
+    @synchronized (requested) {
+        if ([requested containsObject:params]) return;
+        if (requested.count > 200) [requested removeAllObjects];
+        [requested addObject:params];
+    }
+    // Do not issue a request from inside another request's parse callback.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        id service = gDateLyricsYTMPanelService;
+        if (!service) {
+            Class implClass = NSClassFromString(@"YTPanelServiceImpl");
+            id accountID = gDateLyricsYTMAccountID;
+            if (!gDateLyricsYTMOwnedPanelService && implClass && accountID &&
+                [implClass instancesRespondToSelector:@selector(initWithAccountID:)]) {
+                @try {
+                    gDateLyricsYTMOwnedPanelService = ((id (*)(id, SEL, id))objc_msgSend)([implClass alloc], @selector(initWithAccountID:), accountID);
+                    DateLyricsDebugLog(@"[YTM] prefetch created a private panel service (account=%@) -> %d", accountID, gDateLyricsYTMOwnedPanelService != nil);
+                } @catch (NSException *exception) {
+                    NSLog(@"[DateLyrics YTM] creating panel service failed %@: %@", exception.name, exception.reason);
+                }
+            }
+            service = gDateLyricsYTMOwnedPanelService;
+        }
+        Class requestClass = NSClassFromString(@"YTIPanelRequest");
+        SEL setPanelID = NSSelectorFromString(@"setPanelId:");
+        SEL setParams = NSSelectorFromString(@"setParams:");
+        SEL make = NSSelectorFromString(@"makeRequest:refresh:responseBlock:errorBlock:");
+        if (!service || !requestClass || ![service respondsToSelector:make] ||
+            ![requestClass instancesRespondToSelector:setPanelID] || ![requestClass instancesRespondToSelector:setParams]) {
+            DateLyricsDebugLog(@"[YTM] prefetch skipped params=%@ service=%d requestClass=%d accountID=%d", params, service != nil, requestClass != Nil, gDateLyricsYTMAccountID != nil);
+            @synchronized (requested) { [requested removeObject:params]; }   // allow another attempt
+            return;
+        }
+        @try {
+            id request = [[requestClass alloc] init];
+            ((void (*)(id, SEL, id))objc_msgSend)(request, setPanelID, @"PAmusic_watch_lyrics_panel");
+            ((void (*)(id, SEL, id))objc_msgSend)(request, setParams, params);
+            void (^onResponse)(id) = ^(id response) {
+                DateLyricsDebugLog(@"[YTM] prefetch response params=%@ class=%@", params, NSStringFromClass([response class]));
+            };
+            void (^onError)(id) = ^(id error) {
+                DateLyricsDebugLog(@"[YTM] prefetch error params=%@ %@", params, error);
+            };
+            DateLyricsDebugLog(@"[YTM] prefetch requesting lyrics params=%@", params);
+            ((void (*)(id, SEL, id, BOOL, id, id))objc_msgSend)(service, make, request, NO, onResponse, onError);
+        } @catch (NSException *exception) {
+            NSLog(@"[DateLyrics YTM] prefetch exception %@: %@", exception.name, exception.reason);
+        }
+    });
+}
+
+// The params string is base64 of {177: {1: "t_…"}} (bytes 8a 0b <n+2> 0a <n> <id>),
+// where the lyrics id length n varies between songs (15 and 16 seen). It starts
+// with "igs", so decode the first 8 characters to validate the shape and read n,
+// then take exactly as many characters as that length implies. A partial last
+// group is sent by the app with a url-encoded "=" ("%3D").
+static BOOL DateLyricsYTMIsBase64Char(uint8_t c) {
+    return isalnum(c) || c == '_' || c == '-' || c == '+' || c == '/';
+}
+
+static NSString *DateLyricsYTMExtractParams(const uint8_t *bytes, size_t length) {
+    static const char prefix[] = "igs";
+    const uint8_t *cursor = bytes, *limit = bytes + length;
+    while (cursor + 8 <= limit) {
+        const uint8_t *hit = (const uint8_t *)memmem(cursor, (size_t)(limit - cursor), prefix, sizeof(prefix) - 1);
+        if (!hit || hit + 8 > limit) return nil;
+        cursor = hit + 1;
+        NSString *headText = [[NSString alloc] initWithBytes:hit length:8 encoding:NSASCIIStringEncoding];
+        NSData *head = headText ? [[NSData alloc] initWithBase64EncodedString:headText options:0] : nil;
+        if (head.length != 6) continue;
+        const uint8_t *h = (const uint8_t *)head.bytes;
+        if (h[0] != 0x8a || h[1] != 0x0b || h[3] != 0x0a || h[5] != 't') continue;
+        if (h[4] < 10 || h[4] > 24 || h[2] != h[4] + 2) continue;
+        size_t byteCount = 3 + h[2];
+        size_t charCount = (byteCount * 4 + 2) / 3, padCount = (3 - byteCount % 3) % 3;
+        if (hit + charCount > limit) continue;
+        BOOL valid = YES;
+        for (size_t i = 8; i < charCount && valid; i++) valid = DateLyricsYTMIsBase64Char(hit[i]);
+        if (!valid) continue;
+        NSMutableString *params = [[NSMutableString alloc] initWithBytes:hit length:charCount encoding:NSASCIIStringEncoding];
+        for (size_t i = 0; i < padCount; i++) [params appendString:@"%3D"];
+        return params;
+    }
+    return nil;
+}
+
+static void DateLyricsYTMPrefetchLyrics(NSData *data) {
+    // A cached lyrics entity is tiny, so do not apply the size floor used elsewhere.
+    if (!kDateLyricsYouTubeMusicPrefetch || data.length < 40) return;
+    const uint8_t *bytes = (const uint8_t *)data.bytes;
+    NSString *params = DateLyricsYTMExtractParams(bytes, data.length);
+    if (!params) {
+        if (gDateLyricsDebugLogging && memmem(bytes, data.length, "PAmusic_watch_lyrics_panel", 26)) {
+            static NSUInteger logged = 0;
+            if (logged++ < 4) {
+                const uint8_t *marker = (const uint8_t *)memmem(bytes, data.length, "PAmusic_watch_lyrics_panel", 26);
+                size_t at = (size_t)(marker - bytes), from = at > 120 ? at - 120 : 0, to = MIN(data.length, at + 200);
+                NSMutableString *context = [NSMutableString string];
+                for (size_t i = from; i < to; i++) {
+                    [context appendString:(bytes[i] >= 0x20 && bytes[i] < 0x7f) ? [NSString stringWithFormat:@"%c", bytes[i]] : @"·"];
+                }
+                DateLyricsDebugLog(@"[YTM] lyrics panel id found but no params (payload bytes=%lu): %@", (unsigned long)data.length, context);
+            }
+        }
+        return;
+    }
+    DateLyricsDebugLog(@"[YTM] found lyrics params=%@ (payload bytes=%lu, current video=%@)", params,
+        (unsigned long)data.length, gDateLyricsYouTubeMusicVideoID ?: @"<nil>");
+    DateLyricsYTMPrefetchLyricsForParams(params);
+}
+
+static void DateLyricsYTMTryExtractTimedLyrics(NSData *data, id message) {
+    if (![data isKindOfClass:NSData.class] || data.length < 40 || !DateLyricsIsYouTubeMusicHost() || !gDateLyricsEnabled) return;
+    DateLyricsYTMPrefetchLyrics(data);
+    if (data.length < 2000) return;
+    // Resource bundles (file groups) mention "timed_lyrics.eml" by name only.
+    if ([NSStringFromClass([message class]) rangeOfString:@"FileGroup"].location != NSNotFound) return;
     static const char marker[] = "timed_lyrics.eml";
     const uint8_t *bytes = (const uint8_t *)data.bytes;
     const uint8_t *found = (const uint8_t *)memmem(bytes, data.length, marker, sizeof(marker) - 1);
-    if (!found) return;
+    if (!found) {
+        // A renamed component is the likely failure after an app update: report
+        // any component name that mentions lyrics so the new one can be found.
+        if (gDateLyricsDebugLogging && memmem(bytes, data.length, "lyric", 5)) {
+            static NSMutableSet<NSString *> *reported = nil;
+            static dispatch_once_t once;
+            dispatch_once(&once, ^{ reported = [NSMutableSet set]; });
+            NSMutableOrderedSet<NSString *> *names = [NSMutableOrderedSet orderedSet];
+            for (size_t i = 0; i + 4 < data.length && names.count < 12; i++) {
+                if (bytes[i] != '.' || memcmp(bytes + i, ".eml", 4) != 0) continue;
+                size_t begin = i;
+                while (begin > 0 && (isalnum(bytes[begin - 1]) || bytes[begin - 1] == '_') && i - begin < 60) begin--;
+                NSString *name = [[NSString alloc] initWithBytes:bytes + begin length:i + 4 - begin encoding:NSUTF8StringEncoding];
+                if ([name rangeOfString:@"lyric" options:NSCaseInsensitiveSearch].location != NSNotFound) [names addObject:name];
+            }
+            NSString *summary = [names.array componentsJoinedByString:@", "];
+            @synchronized (reported) {
+                if (names.count > 0 && ![reported containsObject:summary]) {
+                    [reported addObject:summary];
+                    DateLyricsDebugLog(@"[YTM] payload mentions lyrics but has no timed_lyrics component; lyric components: %@ (bytes=%lu)",
+                        summary, (unsigned long)data.length);
+                }
+            }
+        }
+        return;
+    }
+    DateLyricsDebugLog(@"[YTM] timed_lyrics component found (payload bytes=%lu)", (unsigned long)data.length);
     NSData *copy = [data copy];
     size_t offset = (size_t)(found - bytes) + sizeof(marker) - 1;
     dispatch_async(gLyricsQueue, ^{
         static NSUInteger lastHash = 0;
         static NSInteger lastTrack = 0;
-        NSInteger trackID = gDateLyricsYouTubeMusicTrackID;
+        const uint8_t *b = (const uint8_t *)copy.bytes;
+        // The response names the video it belongs to ("lyrics_sharing_panel_<id>").
+        // Using it, rather than the track currently playing, matters for lyrics that
+        // are prefetched or arrive late: they must never be filed under another song.
+        NSString *videoID = nil;
+        static const char videoTag[] = "lyrics_sharing_panel_";
+        const uint8_t *tagHit = (const uint8_t *)memmem(b, copy.length, videoTag, sizeof(videoTag) - 1);
+        if (tagHit && (size_t)(tagHit - b) + sizeof(videoTag) - 1 + 11 <= copy.length) {
+            const uint8_t *id = tagHit + sizeof(videoTag) - 1;
+            BOOL valid = YES;
+            for (int i = 0; i < 11; i++) valid = valid && (isalnum(id[i]) || id[i] == '_' || id[i] == '-');
+            if (valid) videoID = [[NSString alloc] initWithBytes:id length:11 encoding:NSASCIIStringEncoding];
+        }
+        NSInteger trackID = videoID ? DateLyricsYouTubeMusicTrackID(videoID, nil, nil) : gDateLyricsYouTubeMusicTrackID;
         if (trackID <= 0) return;
         if (copy.hash == lastHash && trackID == lastTrack) return;
 
-        const uint8_t *b = (const uint8_t *)copy.bytes;
         NSMutableArray<NSDictionary *> *best = [NSMutableArray array];
         // The component name is a string field of a message; the line data
         // follows it inside the same message, so scan from just after the name,
@@ -254,8 +425,8 @@ static void DateLyricsYTMTryExtractTimedLyrics(NSData *data) {
         // Whole-line timing only; word timings are estimated when the score is
         // loaded (see DateLyricsModels.m), so older files benefit as well.
         BOOL wrote = DateLyricsWriteScoreJSON(trackID, lines, NO, @"youtubemusic");
-        DateLyricsDebugLog(@"[YTM] native lyrics parsed lines=%lu first=%@ wrote=%d trackId=%ld",
-            (unsigned long)lines.count, lines.firstObject[@"text"], wrote, (long)trackID);
+        DateLyricsDebugLog(@"[YTM] native lyrics parsed lines=%lu first=%@ wrote=%d trackId=%ld video=%@",
+            (unsigned long)lines.count, lines.firstObject[@"text"], wrote, (long)trackID, videoID ?: @"<current>");
     });
 }
 
@@ -263,19 +434,19 @@ static void DateLyricsYTMTryExtractTimedLyrics(NSData *data) {
 
 - (id)initWithData:(NSData *)data extensionRegistry:(id)registry error:(id *)error {
     id result = %orig;
-    if (result) DateLyricsYTMTryExtractTimedLyrics(data);
+    if (result) DateLyricsYTMTryExtractTimedLyrics(data, result);
     return result;
 }
 
 - (id)initWithData:(NSData *)data error:(id *)error {
     id result = %orig;
-    if (result) DateLyricsYTMTryExtractTimedLyrics(data);
+    if (result) DateLyricsYTMTryExtractTimedLyrics(data, result);
     return result;
 }
 
 - (BOOL)mergeFromData:(NSData *)data extensionRegistry:(id)registry error:(id *)error {
     BOOL result = %orig;
-    if (result) DateLyricsYTMTryExtractTimedLyrics(data);
+    if (result) DateLyricsYTMTryExtractTimedLyrics(data, self);
     return result;
 }
 
@@ -299,6 +470,17 @@ static void DateLyricsYTMTryExtractTimedLyrics(NSData *data) {
         DateLyricsYTMString(info[MPMediaItemPropertyArtist]),
         DateLyricsYTMString(info[MPNowPlayingInfoPropertyExternalContentIdentifier]),
         elapsed ? elapsed.doubleValue : NAN, duration.doubleValue, rate.floatValue, @"MPNowPlayingInfoCenter");
+}
+
+%end
+
+%hook YTPanelServiceImpl
+
+- (id)initWithAccountID:(id)accountID {
+    id result = %orig;
+    if (accountID) gDateLyricsYTMAccountID = accountID;
+    if (result) gDateLyricsYTMPanelService = result;
+    return result;
 }
 
 %end
@@ -383,7 +565,91 @@ static void DateLyricsYTMTryExtractTimedLyrics(NSData *data) {
 
 %end
 
+// Many of the app's objects are built with -initWithAccountID:. Wrap every such
+// initialiser (defined directly on a class of the main executable) until the first
+// account id has been seen, then put the originals back. Later account changes
+// reach gDateLyricsYTMAccountID through the YTPanelServiceImpl hook. Method lists
+// are read without touching the classes, so no +initialize runs from here.
+typedef struct { Method method; IMP original; } DateLyricsYTMWrappedInit;
+static DateLyricsYTMWrappedInit *gDateLyricsYTMWrappedInits = NULL;
+static unsigned int gDateLyricsYTMWrappedInitCount = 0;
+static BOOL gDateLyricsYTMAccountCaptureDone = NO;
+
+static void DateLyricsYouTubeMusicRemoveAccountCapture(NSString *firstClass) {
+    @synchronized ([NSObject class]) {
+        if (gDateLyricsYTMAccountCaptureDone) return;
+        gDateLyricsYTMAccountCaptureDone = YES;
+        for (unsigned int i = 0; i < gDateLyricsYTMWrappedInitCount; i++) {
+            method_setImplementation(gDateLyricsYTMWrappedInits[i].method, gDateLyricsYTMWrappedInits[i].original);
+        }
+    }
+    DateLyricsDebugLog(@"[YTM] account captured from %@; restored %u initialisers", firstClass, gDateLyricsYTMWrappedInitCount);
+}
+
+static void DateLyricsYouTubeMusicInstallAccountCapture(void) {
+    const char *mainImage = [NSBundle mainBundle].executablePath.fileSystemRepresentation;
+    SEL target = @selector(initWithAccountID:);
+    unsigned int classCount = 0;
+    Class *classes = objc_copyClassList(&classCount);
+    gDateLyricsYTMWrappedInits = (DateLyricsYTMWrappedInit *)calloc(classCount, sizeof(DateLyricsYTMWrappedInit));
+    for (unsigned int i = 0; i < classCount; i++) {
+        const char *image = class_getImageName(classes[i]);
+        if (!image || !mainImage || strcmp(image, mainImage) != 0) continue;
+        if (strcmp(class_getName(classes[i]), "YTPanelServiceImpl") == 0) continue;
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(classes[i], &count);
+        for (unsigned int m = 0; m < count; m++) {
+            if (method_getName(methods[m]) != target) continue;
+            const char *types = method_getTypeEncoding(methods[m]);
+            if (!types || types[0] != '@') continue;              // must return an object
+            if (gDateLyricsYTMWrappedInitCount >= classCount) break;
+            IMP original = method_getImplementation(methods[m]);
+            gDateLyricsYTMWrappedInits[gDateLyricsYTMWrappedInitCount++] = (DateLyricsYTMWrappedInit){methods[m], original};
+            method_setImplementation(methods[m], imp_implementationWithBlock(^id(id selfObject, id accountID) {
+                if (accountID) {
+                    gDateLyricsYTMAccountID = accountID;
+                    DateLyricsYouTubeMusicRemoveAccountCapture(NSStringFromClass([selfObject class]));
+                }
+                return ((id (*)(id, SEL, id))original)(selfObject, target, accountID);
+            }));
+        }
+        free(methods);
+    }
+    free(classes);
+    DateLyricsDebugLog(@"[YTM] account capture installed on %u initialisers", gDateLyricsYTMWrappedInitCount);
+}
+
+// Records which of the internals the hooks depend on exist in this build of the
+// app. Must run before %init: Logos adds a method when the hooked class lacks it,
+// which would make every selector look present afterwards.
+static void DateLyricsYouTubeMusicSelfCheck(void) {
+    if (!gDateLyricsDebugLogging) return;
+    NSDictionary *info = [NSBundle mainBundle].infoDictionary;
+    DateLyricsDebugLog(@"[YTM] self-check app=%@ build=%@ ios=%@", info[@"CFBundleShortVersionString"],
+        info[@"CFBundleVersion"], [UIDevice currentDevice].systemVersion);
+    Class playback = NSClassFromString(@"YTLocalPlaybackController");
+    DateLyricsDebugLog(@"[YTM] self-check YTLocalPlaybackController=%d currentVideoID=%d currentVideoTime=%d isPlayingAd=%d "
+        @"setPlaybackRateModel=%d timeDidChange=%d rateDidChange=%d",
+        playback != Nil,
+        [playback instancesRespondToSelector:@selector(currentVideoID)],
+        [playback instancesRespondToSelector:@selector(currentVideoTime)],
+        [playback instancesRespondToSelector:@selector(isPlayingAd)],
+        [playback instancesRespondToSelector:@selector(setPlaybackRateModel:)],
+        [playback instancesRespondToSelector:@selector(singleVideo:currentVideoTimeDidChange:)],
+        [playback instancesRespondToSelector:@selector(singleVideo:playbackRateDidChange:)]);
+    Class nowPlaying = NSClassFromString(@"MPNowPlayingInfoCenter");
+    Class message = NSClassFromString(@"GPBMessage");
+    DateLyricsDebugLog(@"[YTM] self-check MPNowPlayingInfoCenter.setNowPlayingInfo=%d GPBMessage=%d initWithData:extensionRegistry:error:=%d "
+        @"initWithData:error:=%d mergeFromData:extensionRegistry:error:=%d",
+        [nowPlaying instancesRespondToSelector:@selector(setNowPlayingInfo:)], message != Nil,
+        [message instancesRespondToSelector:@selector(initWithData:extensionRegistry:error:)],
+        [message instancesRespondToSelector:@selector(initWithData:error:)],
+        [message instancesRespondToSelector:@selector(mergeFromData:extensionRegistry:error:)]);
+}
+
 void DateLyricsInitYouTubeMusicHooks(void) {
+    DateLyricsYouTubeMusicSelfCheck();
+    DateLyricsYouTubeMusicInstallAccountCapture();
     %init(DateLyricsYouTubeMusic);
     DateLyricsWriteRuntimeStatus();
     DateLyricsDebugLog(@"[YTM] hooks initialized enabled=%d", gDateLyricsEnabled);
