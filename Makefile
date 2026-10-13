@@ -1,6 +1,6 @@
 TARGET := iphone:clang:16.5:16.0
 
-INSTALL_TARGET_PROCESSES = Music YouTubeMusic
+INSTALL_TARGET_PROCESSES = SpringBoard Music YouTubeMusic
 
 include $(THEOS)/makefiles/common.mk
 
