@@ -8,6 +8,11 @@
 @property (nonatomic, assign) NSInteger lyricsAdamID;
 @property (nonatomic, assign) NSInteger retryCount;
 @property (nonatomic, strong) NSURL *lyricURL;
+// Line-timed endpoint to fall back to when lyricURL (syllable lyrics) keeps
+// failing; nil when there is no fallback. Its result is never written to disk,
+// so the syllable endpoint is tried again next time.
+@property (nonatomic, strong) NSURL *legacyLyricURL;
+@property (nonatomic, assign) BOOL usingLegacyURL;
 @property (nonatomic, strong) NSString *lyricsFilePath;
 @property (nonatomic, copy) NSString *fallbackTitle;
 @property (nonatomic, copy) NSString *fallbackArtist;
