@@ -38,7 +38,7 @@ Off by default. Turn on **Enable YouTube Music Support** in Settings → DateLyr
 
 ## Compatibility
 
-- DateLyrics supports any **rootless** or **roothide** jailbreak on iOS 16.0 and later.
+- DateLyrics supports any **rootless** or **roothide** jailbreak on iOS 16.0 and later. However, word-by-word lyrics on iOS 16.0.x and 16.1.x support is unverifed.
 - Users running semi-jailbreaks such as **NathanLR** will need to inject tweaks into the Music application (and YouTube Music, if used) in order for DateLyrics to work.
 - To build the roothide package, use the [roothide fork of Theos](https://github.com/roothide/theos):
 

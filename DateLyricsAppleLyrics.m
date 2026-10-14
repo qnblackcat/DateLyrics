@@ -23,6 +23,33 @@ void DateLyricsSetUnsynchronizedLyricsID(NSInteger lyricsAdamID, BOOL unsynchron
     pthread_mutex_unlock(&gLyricsCacheMutex);
 }
 
+static NSMutableSet<NSNumber *> *gLineTimedOnlyStoreIDs;
+
+BOOL DateLyricsIsLineTimedOnlyThisSession(NSInteger iTunesStoreID) {
+    if (iTunesStoreID <= 0) return NO;
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    BOOL known = [gLineTimedOnlyStoreIDs containsObject:@(iTunesStoreID)];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+    return known;
+}
+
+static void DateLyricsMarkLineTimedOnlyThisSession(NSInteger iTunesStoreID) {
+    if (iTunesStoreID <= 0) return;
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    if (!gLineTimedOnlyStoreIDs) gLineTimedOnlyStoreIDs = [NSMutableSet set];
+    [gLineTimedOnlyStoreIDs addObject:@(iTunesStoreID)];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+}
+
+void DateLyricsEvictMemoryLyrics(NSInteger iTunesStoreID) {
+    if (iTunesStoreID <= 0) return;
+    NSNumber *key = @(iTunesStoreID);
+    pthread_mutex_lock(&gLyricsCacheMutex);
+    [gLyricsCache removeObjectForKey:key];
+    [gWordLyricsCache removeObjectForKey:key];
+    pthread_mutex_unlock(&gLyricsCacheMutex);
+}
+
 static BOOL DateLyricsXMLDeclaresNoTiming(NSData *data) {
     if (!data.length) return NO;
 
@@ -151,10 +178,22 @@ void ProcessNextTask(void) {
     LyricsTask *task = [gLyricsTaskQueue firstObject];
     [gLyricsTaskQueue removeObjectAtIndex:0];
     
-    ICMusicKitURLRequest *request = [[objc_getClass("ICMusicKitURLRequest") alloc] initWithURL:task.lyricURL requestContext:gRequestContext];
+    NSURL *requestURL = task.usingLegacyURL ? task.legacyLyricURL : task.lyricURL;
+    ICMusicKitURLRequest *request = [[objc_getClass("ICMusicKitURLRequest") alloc] initWithURL:requestURL requestContext:gRequestContext];
+    DateLyricsDebugLog(@"[Lyrics] fetch storeID=%ld lyricsID=%ld attempt=%ld legacy=%d url=%@",
+                       (long)task.iTunesStoreID, (long)task.lyricsAdamID, (long)task.retryCount + 1,
+                       task.usingLegacyURL, requestURL);
     [gSession enqueueDataRequest:request withCompletionHandler:^(ICURLResponse *response, NSError *error) {
         dispatch_async(gLyricsQueue, ^{
             BOOL taskFailed = NO;
+            NSUInteger bodyLength = [response.bodyData isKindOfClass:[NSData class]] ? response.bodyData.length : 0;
+            id rawResponse = [response respondsToSelector:NSSelectorFromString(@"urlResponse")]
+                ? [response valueForKey:@"urlResponse"] : nil;
+            NSInteger httpStatus = [rawResponse isKindOfClass:[NSHTTPURLResponse class]]
+                ? ((NSHTTPURLResponse *)rawResponse).statusCode : 0;
+            DateLyricsDebugLog(@"[Lyrics] response storeID=%ld legacy=%d http=%ld bytes=%lu error=%@",
+                               (long)task.iTunesStoreID, task.usingLegacyURL, (long)httpStatus,
+                               (unsigned long)bodyLength, error ?: @"none");
             
             if (error) {
                 taskFailed = YES;
@@ -180,6 +219,9 @@ void ProcessNextTask(void) {
                 }
                 
                 if (![object isKindOfClass:[NSString class]]) {
+                    DateLyricsDebugLog(@"[Lyrics] storeID=%ld legacy=%d response has no TTML string (got %@)",
+                                       (long)task.iTunesStoreID, task.usingLegacyURL,
+                                       object ? NSStringFromClass([object class]) : @"nil");
                     taskFailed = YES;
                 } else {
                     NSData *data = [(NSString *)object dataUsingEncoding:NSUTF8StringEncoding];
@@ -188,10 +230,17 @@ void ProcessNextTask(void) {
                     if (data.length && ParseLyricsData(data, task.iTunesStoreID, task.lyricsAdamID,
                                                        &unsynchronized, &hasWordTiming)) {
                         DateLyricsSetUnsynchronizedLyricsID(task.lyricsAdamID, NO);
-                        if (![data writeToFile:task.lyricsFilePath atomically:YES]) {
+                        DateLyricsDebugLog(@"[Lyrics] parsed storeID=%ld legacy=%d wordTiming=%d",
+                                           (long)task.iTunesStoreID, task.usingLegacyURL, hasWordTiming);
+                        // Line-timed fallback data is not cached on disk, so the
+                        // syllable endpoint gets another chance next launch.  Within
+                        // this session, remember it so the repeated content-item
+                        // updates don't refetch the same track.
+                        if (task.usingLegacyURL) DateLyricsMarkLineTimedOnlyThisSession(task.iTunesStoreID);
+                        if (!task.usingLegacyURL && ![data writeToFile:task.lyricsFilePath atomically:YES]) {
                             taskFailed = YES;
                         } else {
-                            DateLyricsPruneDiskCache();
+                            if (!task.usingLegacyURL) DateLyricsPruneDiskCache();
                             if (!hasWordTiming) {
                                 DateLyricsStartMusixmatchFallback(task.iTunesStoreID, task.fallbackTitle,
                                     task.fallbackArtist, task.fallbackAlbum, task.fallbackDuration, YES);
@@ -210,6 +259,17 @@ void ProcessNextTask(void) {
                 }
             }
             
+            if (taskFailed && !task.usingLegacyURL && task.legacyLyricURL && task.retryCount >= 1) {
+                // The syllable endpoint failed twice; settle for line timing.
+                DateLyricsDebugLog(@"[Lyrics] storeID=%ld syllable fetch failed; falling back to legacy %@",
+                                   (long)task.iTunesStoreID, task.legacyLyricURL);
+                task.usingLegacyURL = YES;
+                task.retryCount = 0;
+                [gLyricsTaskQueue addObject:task];
+                ProcessNextTask();
+                return;
+            }
+
             if (taskFailed) {
                 task.retryCount++;
                 if (task.retryCount < 3) {
@@ -236,7 +296,7 @@ void ProcessNextTask(void) {
 }
 
 void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSURL *lyricURL,
-                           NSString *lyricsFilePath, NSString *fallbackTitle, NSString *fallbackArtist,
+                           NSURL *legacyLyricURL, NSString *lyricsFilePath, NSString *fallbackTitle, NSString *fallbackArtist,
                            NSString *fallbackAlbum, NSTimeInterval fallbackDuration) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -253,6 +313,7 @@ void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSURL *lyri
     task.lyricsAdamID = lyricsAdamID;
     task.retryCount = 0;
     task.lyricURL = lyricURL;
+    task.legacyLyricURL = legacyLyricURL;
     task.lyricsFilePath = lyricsFilePath;
     task.fallbackTitle = fallbackTitle;
     task.fallbackArtist = fallbackArtist;

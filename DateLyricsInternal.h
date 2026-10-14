@@ -92,8 +92,10 @@ void DateLyricsSetUnsynchronizedLyricsID(NSInteger lyricsAdamID, BOOL unsynchron
 BOOL ParseLyricsData(NSData *data, NSInteger iTunesStoreID, __unused NSInteger lyricsAdamID,
                             BOOL *unsynchronizedOut, BOOL *wordTimingOut);
 void ProcessNextTask(void);
+void DateLyricsEvictMemoryLyrics(NSInteger iTunesStoreID);
+BOOL DateLyricsIsLineTimedOnlyThisSession(NSInteger iTunesStoreID);
 void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSURL *lyricURL,
-                           NSString *lyricsFilePath, NSString *fallbackTitle, NSString *fallbackArtist,
+                           NSURL *legacyLyricURL, NSString *lyricsFilePath, NSString *fallbackTitle, NSString *fallbackArtist,
                            NSString *fallbackAlbum, NSTimeInterval fallbackDuration);
 
 // DateLyricsMusixmatch.m

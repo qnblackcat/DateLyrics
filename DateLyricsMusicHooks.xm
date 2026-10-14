@@ -74,15 +74,32 @@
         
         NSInteger lyricsAdamID;
         NSString *lyricURLString;
+        NSString *legacyURLString = nil;
         NSString *storefront = DateLyricsStorefront();
         NSString *locale = DateLyricsPreferredLocale();
-        if ([item.metadata respondsToSelector:@selector(lyricsAdamID)]) {
+        NSOperatingSystemVersion osVersion = [NSProcessInfo processInfo].operatingSystemVersion;
+        BOOL hasLyricsAdamID = [item.metadata respondsToSelector:@selector(lyricsAdamID)];
+        id metadataLyricsURL = [item.metadata respondsToSelector:NSSelectorFromString(@"lyricsURL")]
+            ? [(NSObject *)item.metadata valueForKey:@"lyricsURL"] : nil;
+        DateLyricsDebugLog(@"[Lyrics] track storeID=%ld title=%@ artist=%@ ios=%ld.%ld.%ld metadata=%@ respondsLyricsAdamID=%d lyricsAdamID=%ld metadataLyricsURL=%@ storefront=%@ locale=%@",
+                           (long)iTunesStoreID, fallbackTitle ?: @"", fallbackArtist ?: @"",
+                           (long)osVersion.majorVersion, (long)osVersion.minorVersion, (long)osVersion.patchVersion,
+                           NSStringFromClass([item.metadata class]), hasLyricsAdamID,
+                           (long)(hasLyricsAdamID ? item.metadata.lyricsAdamID : 0),
+                           metadataLyricsURL ?: @"-", storefront, locale);
+        if (hasLyricsAdamID) {
             lyricsAdamID = item.metadata.lyricsAdamID;
             lyricURLString = [NSString stringWithFormat:@"https://amp-api.music.apple.com/v1/catalog/%@/songs/%lld/syllable-lyrics?l=%@", storefront, (long long)lyricsAdamID, locale];
         } else {
+            // Older MediaRemote (iOS 16.2 and earlier) doesn't publish
+            // lyricsAdamID.  Try the syllable endpoint with the store ID first
+            // and keep the line-timed endpoint as a fallback.
             lyricsAdamID = iTunesStoreID;
-            lyricURLString = [NSString stringWithFormat:@"https://se2.itunes.apple.com/WebObjects/MZStoreElements2.woa/wa/ttmlLyrics?id=%lld&l=%@", (long long)iTunesStoreID, locale];
+            lyricURLString = [NSString stringWithFormat:@"https://amp-api.music.apple.com/v1/catalog/%@/songs/%lld/syllable-lyrics?l=%@", storefront, (long long)lyricsAdamID, locale];
+            legacyURLString = [NSString stringWithFormat:@"https://se2.itunes.apple.com/WebObjects/MZStoreElements2.woa/wa/ttmlLyrics?id=%lld&l=%@", (long long)iTunesStoreID, locale];
         }
+        DateLyricsDebugLog(@"[Lyrics] storeID=%ld lyricsID=%ld primary=%@ legacy=%@",
+                           (long)iTunesStoreID, (long)lyricsAdamID, lyricURLString, legacyURLString ?: @"-");
         if (lyricsAdamID <= 0) {
             DateLyricsStartMusixmatchFallback(iTunesStoreID, fallbackTitle, fallbackArtist,
                 fallbackAlbum, fallbackDuration, NO);
@@ -97,18 +114,34 @@
                 fallbackAlbum, fallbackDuration, NO);
             return;
         }
+        if (legacyURLString && DateLyricsIsLineTimedOnlyThisSession(iTunesStoreID)) {
+            DateLyricsDebugLog(@"[Lyrics] storeID=%ld already fetched as line-timed this session; not refetching", (long)iTunesStoreID);
+            DateLyricsStartMusixmatchFallback(iTunesStoreID, fallbackTitle, fallbackArtist,
+                fallbackAlbum, fallbackDuration, YES);
+            return;
+        }
         BOOL lyricsCacheExists = [[NSFileManager defaultManager] fileExistsAtPath:lyricsFilePath];
+        DateLyricsDebugLog(@"[Lyrics] storeID=%ld cacheFile=%@ exists=%d", (long)iTunesStoreID, lyricsFilePath, lyricsCacheExists);
         if (lyricsCacheExists) {
             NSData *cachedData = [NSData dataWithContentsOfFile:lyricsFilePath];
             BOOL unsynchronized = NO;
             BOOL hasWordTiming = NO;
-            if (ParseLyricsData(cachedData, iTunesStoreID, lyricsAdamID,
-                                &unsynchronized, &hasWordTiming)) {
+            BOOL cacheParsed = ParseLyricsData(cachedData, iTunesStoreID, lyricsAdamID,
+                                               &unsynchronized, &hasWordTiming);
+            DateLyricsDebugLog(@"[Lyrics] storeID=%ld cache parsed=%d wordTiming=%d unsynchronized=%d",
+                               (long)iTunesStoreID, cacheParsed, hasWordTiming, unsynchronized);
+            if (cacheParsed && (hasWordTiming || !legacyURLString)) {
                 if (!hasWordTiming) {
                     DateLyricsStartMusixmatchFallback(iTunesStoreID, fallbackTitle, fallbackArtist,
                         fallbackAlbum, fallbackDuration, YES);
                 }
                 return;
+            }
+            if (cacheParsed) {
+                // A line-timed file cached by an earlier version.  Without
+                // lyricsAdamID the syllable endpoint was never tried, so
+                // drop it and fetch again.
+                DateLyricsDebugLog(@"[Lyrics] storeID=%ld dropping line-timed cache; refetching", (long)iTunesStoreID);
             }
             [[NSFileManager defaultManager] removeItemAtPath:lyricsFilePath error:nil];
             if (unsynchronized) {
@@ -120,9 +153,15 @@
             }
         }
 
+        if (legacyURLString) {
+            // Don't let a line-timed entry in memory shadow the syllable data
+            // we are about to fetch.
+            DateLyricsEvictMemoryLyrics(iTunesStoreID);
+        }
         NSURL *lyricURL = [NSURL URLWithString:lyricURLString];
+        NSURL *legacyURL = legacyURLString ? [NSURL URLWithString:legacyURLString] : nil;
         if (lyricURL) {
-            AddTaskToQueue(iTunesStoreID, lyricsAdamID, lyricURL, lyricsFilePath,
+            AddTaskToQueue(iTunesStoreID, lyricsAdamID, lyricURL, legacyURL, lyricsFilePath,
                 fallbackTitle, fallbackArtist, fallbackAlbum, fallbackDuration);
         } else {
             DateLyricsStartMusixmatchFallback(iTunesStoreID, fallbackTitle, fallbackArtist,
