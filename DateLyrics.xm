@@ -2102,6 +2102,8 @@ static BOOL DateLyricsWriteScoreJSON(NSInteger storeID, NSArray<NSDictionary *> 
     if (source.length > 0) score[@"source"] = source;
     score[@"lines"] = linesArray;
 
+    // Timings come from external lyric data; a NaN in them would throw below.
+    if (![NSJSONSerialization isValidJSONObject:score]) return NO;
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:score options:0 error:nil];
     if (!jsonData) return NO;
 
@@ -3222,6 +3224,9 @@ static void AddTaskToQueue(NSInteger iTunesStoreID, NSInteger lyricsAdamID, NSUR
 
 static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float rate, BOOL isSeek) {
     if (storeID <= 0) return;
+    // NSJSONSerialization throws (it does not return an error) on NaN or
+    // infinity, which aborts Music.
+    if (!isfinite(elapsedTime) || !isfinite(rate)) return;
     NSMutableDictionary *anchor = [NSMutableDictionary dictionary];
     anchor[@"protocol"] = @3;
     anchor[@"kind"] = @"anchor";
@@ -3252,7 +3257,8 @@ static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float
     // assignment made rateChanged permanently false, so a 1.0 -> 0.0 pause was
     // never sent to SpringBoard and its local clock kept advancing.
     NSNumber *previousRate = self.amlPlaybackRate;
-    float sanitizedRate = MAX(0.0f, playbackRate);
+    // MAX() passes NaN straight through, so check finiteness explicitly.
+    float sanitizedRate = isfinite(playbackRate) ? MAX(0.0f, playbackRate) : 0.0f;
     self.amlPlaybackRate = @(sanitizedRate);
     self.amlLastSystemElapsedTime = @(elapsedTime);
     self.amlLastSystemTime = @([NSDate timeIntervalSinceReferenceDate]);
@@ -3279,6 +3285,9 @@ static void DateLyricsPublishAnchor(NSInteger storeID, double elapsedTime, float
         self.amlLastStoreID = 0;
         return;
     }
+    // MediaPlayer reports a NaN position while it reloads the queue. It is no
+    // position at all, and must not become the seek-detection baseline.
+    if (!isfinite(elapsedTime)) return;
 
     BOOL rateChanged = !previousRate || fabsf(previousRate.floatValue - sanitizedRate) > 0.001f;
     BOOL trackChanged = (storeID != self.amlLastStoreID);
